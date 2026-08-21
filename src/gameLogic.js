@@ -1,0 +1,193 @@
+// GeoTrace core game data & pure logic (no React/DOM dependencies).
+import wordsRaw from "./words.txt?raw";
+
+export const MAP_WIDTH = 1200;
+export const MAP_HEIGHT = 900;
+export const MAX_GUESSES = 6;
+export const WORD_LENGTH = 5;
+export const ROUND_SECONDS = 60;
+
+// Radii (in map units) used for flag/beacon hit-testing and precision scoring.
+export const BEACON_RADIUS = 20;
+export const FLAG_RADIUS = 16;
+export const HIT_RADIUS = BEACON_RADIUS + FLAG_RADIUS;
+export const MAX_PRECISION_BONUS = 50;
+
+/**
+ * Converts a flag's distance from a beacon's center into a precision bonus.
+ * A dead-center flag earns the full MAX_PRECISION_BONUS; precision decays to
+ * 0 once the flag is BEACON_RADIUS units or further from the center.
+ * @param {number} distance
+ * @returns {{ precision: number, bonus: number }}
+ */
+export function computePrecisionBonus(distance) {
+  const precision = Math.max(0, 1 - distance / BEACON_RADIUS);
+  const bonus = Math.round(precision * MAX_PRECISION_BONUS);
+  return { precision, bonus };
+}
+
+// All 5-letter words parsed from words.txt; solutions are drawn from this pool.
+export const TARGET_WORDS = wordsRaw
+  .split(/\r?\n/)
+  .map((w) => w.trim().toUpperCase())
+  .filter((w) => w.length === WORD_LENGTH);
+
+// Every word in the pool is also a valid guess.
+export const ALLOWED_GUESSES = new Set(TARGET_WORDS);
+
+// Region bounding boxes the beacons are distributed across (1200x900 canvas).
+const REGIONS = [
+  { name: "Ember Coast", x0: 60, y0: 60, x1: 380, y1: 380 },
+  { name: "Frostpeak Range", x0: 430, y0: 60, x1: 780, y1: 340 },
+  { name: "Crystal Highlands", x0: 830, y0: 60, x1: 1140, y1: 380 },
+  { name: "Sunken Delta", x0: 60, y0: 480, x1: 380, y1: 840 },
+  { name: "Shadow Marsh", x0: 430, y0: 500, x1: 780, y1: 840 },
+  { name: "Storm Isles", x0: 830, y0: 480, x1: 1140, y1: 840 },
+];
+
+// Deterministic pseudo-random generator so beacon layout is stable across sessions.
+function seededRandom(seed) {
+  let t = seed + 0x6d2b79f5;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+// Letter pool: repeated entries create multiple beacons for frequently-used letters.
+// All 26 letters are represented; higher-frequency letters get more beacons.
+const LETTER_POOL = [
+  "E",
+  "E",
+  "E",
+  "E",
+  "E",
+  "E",
+  "A",
+  "A",
+  "A",
+  "A",
+  "A",
+  "R",
+  "R",
+  "R",
+  "R",
+  "R",
+  "I",
+  "I",
+  "I",
+  "I",
+  "I",
+  "O",
+  "O",
+  "O",
+  "O",
+  "T",
+  "T",
+  "T",
+  "T",
+  "N",
+  "N",
+  "N",
+  "N",
+  "S",
+  "S",
+  "S",
+  "S",
+  "L",
+  "L",
+  "L",
+  "C",
+  "C",
+  "C",
+  "U",
+  "U",
+  "U",
+  "D",
+  "D",
+  "D",
+  "P",
+  "P",
+  "M",
+  "M",
+  "H",
+  "H",
+  "G",
+  "G",
+  "B",
+  "B",
+  "F",
+  "F",
+  "Y",
+  "Y",
+  "W",
+  "W",
+  "K",
+  "V",
+  "X",
+  "Z",
+  "J",
+  "Q",
+];
+
+function generateBeacons() {
+  return LETTER_POOL.map((char, index) => {
+    const region = REGIONS[index % REGIONS.length];
+    const rx = seededRandom(index * 2 + 1);
+    const ry = seededRandom(index * 2 + 2);
+    const pad = 30;
+    const x = Math.round(
+      region.x0 + pad + rx * (region.x1 - region.x0 - pad * 2),
+    );
+    const y = Math.round(
+      region.y0 + pad + ry * (region.y1 - region.y0 - pad * 2),
+    );
+    return {
+      id: `beacon-${index}-${char}`,
+      char,
+      x,
+      y,
+      region: region.name,
+    };
+  });
+}
+
+export const BEACONS = generateBeacons();
+
+export function pickRandomSolution() {
+  return TARGET_WORDS[Math.floor(Math.random() * TARGET_WORDS.length)];
+}
+
+/**
+ * Standard two-pass Wordle evaluation with correct duplicate-letter handling.
+ * @param {string} guess - 5 letter guess.
+ * @param {string} solution - 5 letter solution.
+ * @returns {('correct'|'present'|'absent')[]}
+ */
+export function evaluateGuess(guess, solution) {
+  const guessLetters = guess.toUpperCase().split("");
+  const solutionLetters = solution.toUpperCase().split("");
+  const statuses = new Array(guessLetters.length).fill("absent");
+  const remainingCounts = {};
+
+  // Pass 1: mark exact matches, tally remaining (unmatched) solution letters.
+  for (let i = 0; i < guessLetters.length; i += 1) {
+    if (guessLetters[i] === solutionLetters[i]) {
+      statuses[i] = "correct";
+    } else {
+      remainingCounts[solutionLetters[i]] =
+        (remainingCounts[solutionLetters[i]] || 0) + 1;
+    }
+  }
+
+  // Pass 2: mark present letters, consuming from the remaining letter pool.
+  for (let i = 0; i < guessLetters.length; i += 1) {
+    if (statuses[i] === "correct") continue;
+    const letter = guessLetters[i];
+    if (remainingCounts[letter] > 0) {
+      statuses[i] = "present";
+      remainingCounts[letter] -= 1;
+    }
+  }
+
+  return statuses;
+}

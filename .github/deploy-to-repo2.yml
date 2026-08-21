@@ -1,0 +1,39 @@
+name: Build and Push to Public Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install and Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Push built assets to public repo2
+        uses: cpina/github-action-push-to-another-repository@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.DEPLOY_TOKEN }}
+        with:
+          source-directory: "dist"
+          destination-github-username: "lukepwn"
+          destination-repository-name: "lukepwn.github.io"
+          target-directory: "GeoTrace"
+          target-branch: "main"
+          user-email: "action@github.com"
+          user-name: "GitHub Action Deployer"
+          commit-message: "Deploy GeoTrace build from private repo"
