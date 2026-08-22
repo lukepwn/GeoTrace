@@ -30,6 +30,7 @@ function createInitialState() {
   return {
     solution: pickRandomSolution(),
     guesses: [],
+    creditedCorrectLetters: [],
     currentTrace: [],
     score: 0,
     elapsedSeconds: 0,
@@ -144,12 +145,18 @@ export default function App() {
         };
       }
 
-      const rawBonus = prev.currentTrace.reduce((sum, t) => sum + t.bonus, 0);
+      const statuses = evaluateGuess(guessWord, prev.solution);
+      const newlyCorrectLetters = new Set(prev.creditedCorrectLetters);
+      const rawBonus = prev.currentTrace.reduce((sum, trace, index) => {
+        if (statuses[index] !== "correct") return sum;
+        if (newlyCorrectLetters.has(trace.beacon.char)) return sum;
+        newlyCorrectLetters.add(trace.beacon.char);
+        return sum + trace.bonus;
+      }, 0);
       const roundBonus = Math.round(
         rawBonus * speedMultiplier(prev.elapsedSeconds),
       );
       const nextScore = prev.score + roundBonus;
-      const statuses = evaluateGuess(guessWord, prev.solution);
       const evaluatedRow = { word: guessWord, statuses };
       const nextGuesses = [...prev.guesses, evaluatedRow];
       const isWin = statuses.every((s) => s === "correct");
@@ -159,6 +166,7 @@ export default function App() {
         return {
           ...prev,
           guesses: nextGuesses,
+          creditedCorrectLetters: [...newlyCorrectLetters],
           currentTrace: [],
           score: nextScore,
           gameState: "WON",
@@ -170,6 +178,7 @@ export default function App() {
         return {
           ...prev,
           guesses: nextGuesses,
+          creditedCorrectLetters: [...newlyCorrectLetters],
           currentTrace: [],
           score: nextScore,
           gameState: "LOST",
@@ -181,6 +190,7 @@ export default function App() {
       return {
         ...prev,
         guesses: nextGuesses,
+        creditedCorrectLetters: [...newlyCorrectLetters],
         currentTrace: [],
         shakeId: prev.shakeId + 1,
         score: nextScore,

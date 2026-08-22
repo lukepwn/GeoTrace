@@ -1,5 +1,6 @@
 // GeoTrace core game data & pure logic (no React/DOM dependencies).
 import wordsRaw from "./words.txt?raw";
+import solutionsRaw from "./solutions.txt?raw";
 
 export const MAP_WIDTH = 1200;
 export const MAP_HEIGHT = 900;
@@ -25,14 +26,18 @@ export function computePrecisionBonus(distance) {
   return { precision, bonus };
 }
 
-// All 5-letter words parsed from words.txt; solutions are drawn from this pool.
-export const TARGET_WORDS = wordsRaw
+// Solutions and valid guesses are maintained as separate word pools.
+export const TARGET_WORDS = solutionsRaw
   .split(/\r?\n/)
   .map((w) => w.trim().toUpperCase())
   .filter((w) => w.length === WORD_LENGTH);
 
-// Every word in the pool is also a valid guess.
-export const ALLOWED_GUESSES = new Set(TARGET_WORDS);
+export const ALLOWED_GUESSES = new Set(
+  wordsRaw
+    .split(/\r?\n/)
+    .map((w) => w.trim().toUpperCase())
+    .filter((w) => w.length === WORD_LENGTH),
+);
 
 // Region bounding boxes the beacons are distributed across (1200x900 canvas).
 const REGIONS = [
