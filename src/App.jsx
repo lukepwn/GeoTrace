@@ -13,12 +13,18 @@ import WorldMap from "./components/WorldMap.jsx";
 import {
   ALLOWED_GUESSES,
   MAX_GUESSES,
-  ROUND_SECONDS,
   WORD_LENGTH,
   evaluateGuess,
   pickRandomSolution,
 } from "./gameLogic";
 import "./App.css";
+
+// Faster guesses earn a bigger speed multiplier on their precision bonus.
+function speedMultiplier(elapsedSeconds) {
+  if (elapsedSeconds < 20) return 2;
+  if (elapsedSeconds < 40) return 1.5;
+  return 1;
+}
 
 function createInitialState() {
   return {
@@ -26,10 +32,17 @@ function createInitialState() {
     guesses: [],
     currentTrace: [],
     score: 0,
-    timeLeft: ROUND_SECONDS,
+    elapsedSeconds: 0,
     gameState: "PLAYING",
     statusMessage: "Trace beacons on the map to spell your guess.",
+    shakeId: 0,
   };
+}
+
+function formatStopwatch(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 function fireVictoryConfetti() {
@@ -48,29 +61,21 @@ export default function App() {
     guesses,
     currentTrace,
     score,
-    timeLeft,
+    elapsedSeconds,
     gameState,
     statusMessage,
+    shakeId,
   } = state;
   const statusTimeoutRef = useRef(null);
 
-  // 60-second countdown; ends the round in a loss once it hits zero.
+  // Stopwatch counts up while playing; it only drives the speed bonus, it never ends the round.
   useEffect(() => {
     if (gameState !== "PLAYING") return undefined;
 
     const intervalId = setInterval(() => {
       setState((prev) => {
         if (prev.gameState !== "PLAYING") return prev;
-        const nextTime = prev.timeLeft - 1;
-        if (nextTime <= 0) {
-          return {
-            ...prev,
-            timeLeft: 0,
-            gameState: "LOST",
-            statusMessage: `Time's up! The word was ${prev.solution}.`,
-          };
-        }
-        return { ...prev, timeLeft: nextTime };
+        return { ...prev, elapsedSeconds: prev.elapsedSeconds + 1 };
       });
     }, 1000);
 
@@ -90,10 +95,10 @@ export default function App() {
 
       const entry = { beacon, precision: meta.precision, bonus: meta.bonus };
       const existingIndex = prev.currentTrace.findIndex(
-        (t) => t.beacon.char === beacon.char,
+        (t) => t.beacon.id === beacon.id,
       );
 
-      // Re-selecting an already-traced letter repositions its flag instead of adding a duplicate.
+      // Re-selecting the same beacon repositions its flag instead of adding a duplicate.
       if (existingIndex !== -1) {
         const nextTrace = [...prev.currentTrace];
         nextTrace[existingIndex] = entry;
@@ -135,10 +140,14 @@ export default function App() {
         return {
           ...prev,
           statusMessage: `"${guessWord}" is not a recognized word.`,
+          shakeId: prev.shakeId + 1,
         };
       }
 
-      const roundBonus = prev.currentTrace.reduce((sum, t) => sum + t.bonus, 0);
+      const rawBonus = prev.currentTrace.reduce((sum, t) => sum + t.bonus, 0);
+      const roundBonus = Math.round(
+        rawBonus * speedMultiplier(prev.elapsedSeconds),
+      );
       const nextScore = prev.score + roundBonus;
       const statuses = evaluateGuess(guessWord, prev.solution);
       const evaluatedRow = { word: guessWord, statuses };
@@ -165,6 +174,7 @@ export default function App() {
           score: nextScore,
           gameState: "LOST",
           statusMessage: `Out of guesses. The word was ${prev.solution}.`,
+          shakeId: prev.shakeId + 1,
         };
       }
 
@@ -172,6 +182,7 @@ export default function App() {
         ...prev,
         guesses: nextGuesses,
         currentTrace: [],
+        shakeId: prev.shakeId + 1,
         score: nextScore,
         statusMessage: `+${roundBonus} bonus banked. Keep tracing.`,
       };
@@ -186,14 +197,7 @@ export default function App() {
     setState(createInitialState());
   }, []);
 
-  const multiplier =
-    timeLeft > 40
-      ? "2.0x"
-      : timeLeft > 20
-        ? "1.5x"
-        : timeLeft > 0
-          ? "1.0x"
-          : "0x";
+  const multiplier = `${speedMultiplier(elapsedSeconds).toFixed(1)}x`;
 
   const rows = [];
   for (let i = 0; i < MAX_GUESSES; i += 1) {
@@ -231,9 +235,9 @@ export default function App() {
               <Star size={16} />
               <span>{score}</span>
             </div>
-            <div className="badge badge-timer">
+            <div className="badge badge-timer" title="Elapsed time">
               <Timer size={16} />
-              <span>{timeLeft}s</span>
+              <span>{formatStopwatch(elapsedSeconds)}</span>
             </div>
             <div className="badge badge-multiplier">
               <Zap size={16} />
@@ -242,7 +246,11 @@ export default function App() {
           </div>
         </header>
 
-        <section className="deduction-grid" aria-label="Guess history">
+        <section
+          className={`deduction-grid${shakeId > 0 ? " deduction-grid--wrong" : ""}`}
+          aria-label="Guess history"
+          key={shakeId}
+        >
           {rows.map((row, rowIndex) => (
             <div
               className={`grid-row${row.active ? " grid-row--active" : ""}`}

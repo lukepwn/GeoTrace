@@ -51,6 +51,7 @@ const CLICK_DRAG_THRESHOLD = 6;
 
 export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
   const [flags, setFlags] = useState([]);
+  const [isNavigating, setIsNavigating] = useState(false);
   const timeoutsRef = useRef(new Set());
   const pointerDownRef = useRef(null);
 
@@ -112,9 +113,9 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
         return;
       }
 
-      // Re-clicking a letter already in the trace repositions its flag instead of adding a duplicate.
+      // Re-clicking the same beacon repositions its flag instead of adding a duplicate.
       const isReposition = currentTrace.some(
-        (t) => t.beacon.char === closestBeacon.char,
+        (t) => t.beacon.id === closestBeacon.id,
       );
       const isFull = !isReposition && currentTrace.length >= WORD_LENGTH;
       if (isFull) {
@@ -130,107 +131,115 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
   );
 
   return (
-    <TransformWrapper
-      initialScale={2.4}
-      minScale={1}
-      maxScale={4}
-      limitToBounds={false}
-      centerOnInit
-      wheel={{ step: 0.15 }}
-      doubleClick={{ disabled: true }}
-      velocityAnimation={{
-        sensitivityMouse: 0.5,
-        sensitivityTouch: 0.6,
-        maxStrengthMouse: 8,
-        maxStrengthTouch: 10,
-        animationTime: 300,
-        maxAnimationTime: 400,
-      }}
+    <div
+      className={`map-viewport${isNavigating ? " map-viewport--active" : ""}`}
     >
-      <TransformComponent
-        wrapperStyle={{ width: "100%", height: "100%" }}
-        contentStyle={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
+      <TransformWrapper
+        initialScale={2.4}
+        minScale={1}
+        maxScale={4}
+        limitToBounds={false}
+        centerOnInit
+        wheel={{ step: 0.15 }}
+        doubleClick={{ disabled: true }}
+        velocityAnimation={{
+          sensitivityMouse: 0.5,
+          sensitivityTouch: 0.6,
+          maxStrengthMouse: 8,
+          maxStrengthTouch: 10,
+          animationTime: 300,
+          maxAnimationTime: 400,
+        }}
+        onPanningStart={() => setIsNavigating(true)}
+        onPanningStop={() => setIsNavigating(false)}
+        onZoomStart={() => setIsNavigating(true)}
+        onZoomStop={() => setIsNavigating(false)}
       >
-        <div
-          className="world-map-canvas"
-          style={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
+        <TransformComponent
+          wrapperStyle={{ width: "100%", height: "100%" }}
+          contentStyle={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
         >
-          <svg
-            className="world-map-svg"
-            width={MAP_WIDTH}
-            height={MAP_HEIGHT}
-            viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+          <div
+            className="world-map-canvas"
+            style={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
           >
-            <defs>
-              <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="5" result="blur" />
-                <feMerge>
-                  <feMergeNode in="blur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-            </defs>
+            <svg
+              className="world-map-svg"
+              width={MAP_WIDTH}
+              height={MAP_HEIGHT}
+              viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+            >
+              <defs>
+                <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
 
-            {ISLANDS.map((island, i) => (
-              <path
-                key={i}
-                d={island.d}
-                fill={island.fill}
-                stroke="#1b2942"
-                strokeWidth={2}
-              />
-            ))}
+              {ISLANDS.map((island, i) => (
+                <path
+                  key={i}
+                  d={island.d}
+                  fill={island.fill}
+                  stroke="#1b2942"
+                  strokeWidth={2}
+                />
+              ))}
 
-            {tracePoints && (
-              <polyline
-                points={tracePoints}
-                fill="none"
-                stroke="#38bdf8"
-                strokeWidth={3}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                filter="url(#glow)"
-                opacity={0.9}
-              />
-            )}
-          </svg>
+              {tracePoints && (
+                <polyline
+                  points={tracePoints}
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  filter="url(#glow)"
+                  opacity={0.9}
+                />
+              )}
+            </svg>
 
-          {BEACONS.map((beacon) => {
-            const traceEntry = currentTrace.find(
-              (t) => t.beacon.id === beacon.id,
-            );
-            return (
+            {BEACONS.map((beacon) => {
+              const traceEntry = currentTrace.find(
+                (t) => t.beacon.id === beacon.id,
+              );
+              return (
+                <div
+                  key={beacon.id}
+                  className={`beacon${traceEntry ? " beacon--selected" : ""}`}
+                  style={{ left: beacon.x, top: beacon.y }}
+                  title={beacon.region}
+                >
+                  {beacon.char}
+                  {traceEntry && (
+                    <span className="beacon-bonus">+{traceEntry.bonus}</span>
+                  )}
+                </div>
+              );
+            })}
+
+            {flags.map((flag) => (
               <div
-                key={beacon.id}
-                className={`beacon${traceEntry ? " beacon--selected" : ""}`}
-                style={{ left: beacon.x, top: beacon.y }}
-                title={beacon.region}
+                key={flag.id}
+                className={`flag-marker${flag.hit ? " flag-marker--hit" : " flag-marker--miss"}`}
+                style={{ left: flag.x, top: flag.y }}
               >
-                {beacon.char}
-                {traceEntry && (
-                  <span className="beacon-bonus">+{traceEntry.bonus}</span>
+                <span className="flag-marker-radius" />
+                <MapPinned size={22} className="flag-marker-icon" />
+                {flag.hit && (
+                  <span className="flag-marker-bonus">+{flag.bonus} BONUS</span>
                 )}
               </div>
-            );
-          })}
-
-          {flags.map((flag) => (
-            <div
-              key={flag.id}
-              className={`flag-marker${flag.hit ? " flag-marker--hit" : " flag-marker--miss"}`}
-              style={{ left: flag.x, top: flag.y }}
-            >
-              <span className="flag-marker-radius" />
-              <MapPinned size={22} className="flag-marker-icon" />
-              {flag.hit && (
-                <span className="flag-marker-bonus">+{flag.bonus} BONUS</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </TransformComponent>
-    </TransformWrapper>
+            ))}
+          </div>
+        </TransformComponent>
+      </TransformWrapper>
+    </div>
   );
 }

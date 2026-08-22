@@ -5,7 +5,6 @@ export const MAP_WIDTH = 1200;
 export const MAP_HEIGHT = 900;
 export const MAX_GUESSES = 6;
 export const WORD_LENGTH = 5;
-export const ROUND_SECONDS = 60;
 
 // Radii (in map units) used for flag/beacon hit-testing and precision scoring.
 export const BEACON_RADIUS = 20;
@@ -130,25 +129,50 @@ const LETTER_POOL = [
 ];
 
 function generateBeacons() {
-  return LETTER_POOL.map((char, index) => {
-    const region = REGIONS[index % REGIONS.length];
-    const rx = seededRandom(index * 2 + 1);
-    const ry = seededRandom(index * 2 + 2);
-    const pad = 30;
-    const x = Math.round(
-      region.x0 + pad + rx * (region.x1 - region.x0 - pad * 2),
-    );
-    const y = Math.round(
-      region.y0 + pad + ry * (region.y1 - region.y0 - pad * 2),
-    );
-    return {
-      id: `beacon-${index}-${char}`,
-      char,
-      x,
-      y,
-      region: region.name,
-    };
+  // Group letters by their assigned region while keeping the original round-robin mapping.
+  const regionGroups = REGIONS.map(() => []);
+  LETTER_POOL.forEach((char, index) => {
+    regionGroups[index % REGIONS.length].push({ char, index });
   });
+
+  const beaconDiameter = BEACON_RADIUS * 2;
+  const minGap = 8; // extra breathing room so hit areas never touch.
+  const beacons = [];
+
+  regionGroups.forEach((group, regionIndex) => {
+    const region = REGIONS[regionIndex];
+    const count = group.length;
+    const cols = Math.ceil(Math.sqrt(count));
+    const rows = Math.ceil(count / cols);
+    const pad = 30;
+    const cellW = (region.x1 - region.x0 - pad * 2) / cols;
+    const cellH = (region.y1 - region.y0 - pad * 2) / rows;
+    // Jitter is capped so neighboring cells' beacons can never overlap.
+    const maxJitterX = Math.max(0, (cellW - beaconDiameter - minGap) / 2);
+    const maxJitterY = Math.max(0, (cellH - beaconDiameter - minGap) / 2);
+
+    group.forEach((item, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const rx = seededRandom(item.index * 2 + 1) * 2 - 1;
+      const ry = seededRandom(item.index * 2 + 2) * 2 - 1;
+      const x = Math.round(
+        region.x0 + pad + (col + 0.5) * cellW + rx * maxJitterX,
+      );
+      const y = Math.round(
+        region.y0 + pad + (row + 0.5) * cellH + ry * maxJitterY,
+      );
+      beacons.push({
+        id: `beacon-${item.index}-${item.char}`,
+        char: item.char,
+        x,
+        y,
+        region: region.name,
+      });
+    });
+  });
+
+  return beacons;
 }
 
 export const BEACONS = generateBeacons();
