@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Analytics } from "@vercel/analytics/next";
 import confetti from "canvas-confetti";
 import {
   ArrowRight,
@@ -616,6 +617,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <Analytics />
     </div>
   );
 }
