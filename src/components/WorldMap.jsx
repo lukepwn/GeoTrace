@@ -48,17 +48,108 @@ const ISLANDS = [
 
 // Pointer must move less than this (px) between down/up to count as a click, not a pan.
 const CLICK_DRAG_THRESHOLD = 6;
+// WASD pan speed, in px/sec at 1x zoom.
+const PAN_SPEED = 900;
 
-export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
+// Keys mapped to their pan direction; inverted from arrow-key convention (W moves view up).
+const PAN_KEYS = {
+  w: [0, 1],
+  s: [0, -1],
+  a: [1, 0],
+  d: [-1, 0],
+};
+
+export default function WorldMap({
+  currentTrace,
+  onSelectLetter,
+  onNavigate,
+  disabled,
+}) {
   const [flags, setFlags] = useState([]);
   const [isNavigating, setIsNavigating] = useState(false);
   const timeoutsRef = useRef(new Set());
   const pointerDownRef = useRef(null);
+  const transformRef = useRef(null);
 
   useEffect(() => {
     const timeouts = timeoutsRef.current;
     return () => timeouts.forEach((id) => clearTimeout(id));
   }, []);
+
+  // WASD pans the map smoothly; held keys combine into a normalized diagonal vector each frame.
+  useEffect(() => {
+    const pressedKeys = new Set();
+    let animationFrameId = null;
+    let lastTimestamp = null;
+
+    const step = (timestamp) => {
+      if (lastTimestamp === null) lastTimestamp = timestamp;
+      const deltaSeconds = (timestamp - lastTimestamp) / 1000;
+      lastTimestamp = timestamp;
+
+      let vx = 0;
+      let vy = 0;
+      pressedKeys.forEach((key) => {
+        const dir = PAN_KEYS[key];
+        if (!dir) return;
+        vx += dir[0];
+        vy += dir[1];
+      });
+
+      const instance = transformRef.current?.instance;
+      if ((vx || vy) && instance) {
+        const magnitude = Math.hypot(vx, vy) || 1;
+        const { positionX, positionY, scale } = instance.transformState;
+        const distance = PAN_SPEED * scale * deltaSeconds;
+        transformRef.current.setTransform(
+          positionX + (vx / magnitude) * distance,
+          positionY + (vy / magnitude) * distance,
+          scale,
+          0,
+        );
+      }
+
+      animationFrameId = requestAnimationFrame(step);
+    };
+
+    const handleKeyDown = (event) => {
+      const key = event.key.toLowerCase();
+      if (!PAN_KEYS[key] || disabled) return;
+      event.preventDefault();
+      if (pressedKeys.size === 0) {
+        lastTimestamp = null;
+        animationFrameId = requestAnimationFrame(step);
+      }
+      pressedKeys.add(key);
+    };
+
+    const handleKeyUp = (event) => {
+      const key = event.key.toLowerCase();
+      pressedKeys.delete(key);
+      if (pressedKeys.size === 0 && animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    const handleBlur = () => {
+      pressedKeys.clear();
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+    };
+  }, [disabled]);
 
   const tracePoints = useMemo(
     () => currentTrace.map((t) => `${t.beacon.x},${t.beacon.y}`).join(" "),
@@ -95,11 +186,11 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
         }
       }
 
-      const addFlag = (hit, bonus) => {
+      const addFlag = (status, bonus) => {
         const flagId = `flag-${Date.now()}-${Math.random()}`;
         setFlags((prev) => [
           ...prev,
-          { id: flagId, x: mapX, y: mapY, hit, bonus },
+          { id: flagId, x: mapX, y: mapY, status, bonus },
         ]);
         const timeoutId = setTimeout(() => {
           setFlags((prev) => prev.filter((f) => f.id !== flagId));
@@ -109,7 +200,7 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
       };
 
       if (!closestBeacon) {
-        addFlag(false, 0);
+        addFlag("miss", 0);
         return;
       }
 
@@ -119,12 +210,12 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
       );
       const isFull = !isReposition && currentTrace.length >= WORD_LENGTH;
       if (isFull) {
-        addFlag(false, 0);
+        addFlag("full", 0);
         return;
       }
 
       const { precision, bonus } = computePrecisionBonus(closestDistance);
-      addFlag(true, bonus);
+      addFlag("hit", bonus);
       onSelectLetter(closestBeacon, { precision, bonus, isReposition });
     },
     [disabled, currentTrace, onSelectLetter],
@@ -135,6 +226,7 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
       className={`map-viewport${isNavigating ? " map-viewport--active" : ""}`}
     >
       <TransformWrapper
+        ref={transformRef}
         initialScale={2.4}
         minScale={1}
         maxScale={4}
@@ -142,17 +234,17 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
         centerOnInit
         wheel={{ step: 0.15 }}
         doubleClick={{ disabled: true }}
-        velocityAnimation={{
-          sensitivityMouse: 0.5,
-          sensitivityTouch: 0.6,
-          maxStrengthMouse: 8,
-          maxStrengthTouch: 10,
-          animationTime: 300,
-          maxAnimationTime: 400,
+        panning={{ velocityDisabled: true }}
+        alignmentAnimation={{ disabled: true }}
+        onPanningStart={() => {
+          setIsNavigating(true);
+          onNavigate?.();
         }}
-        onPanningStart={() => setIsNavigating(true)}
         onPanningStop={() => setIsNavigating(false)}
-        onZoomStart={() => setIsNavigating(true)}
+        onZoomStart={() => {
+          setIsNavigating(true);
+          onNavigate?.();
+        }}
         onZoomStop={() => setIsNavigating(false)}
       >
         <TransformComponent
@@ -227,13 +319,16 @@ export default function WorldMap({ currentTrace, onSelectLetter, disabled }) {
             {flags.map((flag) => (
               <div
                 key={flag.id}
-                className={`flag-marker${flag.hit ? " flag-marker--hit" : " flag-marker--miss"}`}
+                className={`flag-marker flag-marker--${flag.status}`}
                 style={{ left: flag.x, top: flag.y }}
               >
                 <span className="flag-marker-radius" />
                 <MapPinned size={22} className="flag-marker-icon" />
-                {flag.hit && (
+                {flag.status === "hit" && (
                   <span className="flag-marker-bonus">+{flag.bonus} BONUS</span>
+                )}
+                {flag.status === "full" && (
+                  <span className="flag-marker-bonus"></span>
                 )}
               </div>
             ))}
