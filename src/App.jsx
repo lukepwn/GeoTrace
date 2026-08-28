@@ -10,8 +10,11 @@ import {
   Radio,
   Send,
   RotateCcw,
+  Settings,
+  Share2,
   Star,
   Timer,
+  X,
   Zap,
 } from "lucide-react";
 import WorldMap from "./components/WorldMap.jsx";
@@ -24,18 +27,39 @@ import {
 } from "./gameLogic";
 import "./App.css";
 
-// Faster guesses earn a bigger speed multiplier on their precision bonus.
+// Rewards how fast each individual guess was submitted (not total game time),
+// so a snappy guess late in the round still earns its multiplier.
 function speedMultiplier(elapsedSeconds) {
-  if (elapsedSeconds < 20) return 2;
-  if (elapsedSeconds < 40) return 1.5;
+  if (elapsedSeconds < 30) return 2;
+  if (elapsedSeconds < 60) return 1.5;
   return 1;
+}
+
+// Score tiers are calibrated against realistic play data rather than the raw
+// theoretical max: most players (casual 2-4min, stuck 5min+) finish well past
+// the speed-multiplier window and rely on precision alone, since beacons must
+// be found on the map first. Only fast/skilled players (10-60s, ~4 guesses)
+// bank the 1.5x/2x multiplier on more than one or two letters.
+const SCORE_TIERS = [
+  { tier: "S", min: 300, label: "Legendary" },
+  { tier: "A", min: 220, label: "Excellent" },
+  { tier: "B", min: 150, label: "Great" },
+  { tier: "C", min: 90, label: "Solid" },
+  { tier: "D", min: 0, label: "Scraped By" },
+];
+
+function getScoreTier(score) {
+  return (
+    SCORE_TIERS.find((t) => score >= t.min) ??
+    SCORE_TIERS[SCORE_TIERS.length - 1]
+  );
 }
 
 function createInitialState() {
   return {
     solution: pickRandomSolution(),
     guesses: [],
-    creditedCorrectLetters: [],
+    creditedBonusByChar: {},
     currentTrace: [],
     score: 0,
     elapsedSeconds: 0,
@@ -60,11 +84,15 @@ function fireVictoryConfetti() {
   });
 }
 
+const THEME_STORAGE_KEY = "geotrace-theme";
+
 export default function App() {
   const [state, setState] = useState(createInitialState);
   const [launchPhase, setLaunchPhase] = useState("TUTORIAL");
   const [showExploreHint, setShowExploreHint] = useState(true);
   const [tutorialPage, setTutorialPage] = useState(0);
+
+  const [showSettings, setShowSettings] = useState(false);
   const {
     solution,
     guesses,
@@ -175,31 +203,42 @@ export default function App() {
       }
 
       const statuses = evaluateGuess(guessWord, prev.solution);
-      const newlyCorrectLetters = new Set(prev.creditedCorrectLetters);
-      const rawBonus = prev.currentTrace.reduce((sum, trace, index) => {
+      const currentSpeedMultiplier = speedMultiplier(prev.elapsedSeconds);
+      // Re-guessing an already-correct letter can adjust its precision bonus,
+      // but the speed multiplier locks in at the moment the letter was first
+      // guessed correctly so later, slower guesses can't erode it.
+      const nextCreditedBonusByChar = { ...prev.creditedBonusByChar };
+      const roundBonus = prev.currentTrace.reduce((sum, trace, index) => {
         if (statuses[index] !== "correct") return sum;
-        if (newlyCorrectLetters.has(trace.beacon.char)) return sum;
-        newlyCorrectLetters.add(trace.beacon.char);
-        return sum + trace.bonus;
+        const char = trace.beacon.char;
+        const previous = nextCreditedBonusByChar[char];
+        const lockedMultiplier = previous?.multiplier ?? currentSpeedMultiplier;
+        const previousBanked = previous
+          ? Math.round(previous.bonus * previous.multiplier)
+          : 0;
+        const nextBanked = Math.round(trace.bonus * lockedMultiplier);
+        nextCreditedBonusByChar[char] = {
+          bonus: trace.bonus,
+          multiplier: lockedMultiplier,
+        };
+        return sum + (nextBanked - previousBanked);
       }, 0);
-      const roundBonus = Math.round(
-        rawBonus * speedMultiplier(prev.elapsedSeconds),
-      );
-      const nextScore = prev.score + roundBonus;
+      const nextScore = Math.max(0, prev.score + roundBonus);
       const evaluatedRow = { word: guessWord, statuses };
       const nextGuesses = [...prev.guesses, evaluatedRow];
       const isWin = statuses.every((s) => s === "correct");
       const isLastGuess = nextGuesses.length >= MAX_GUESSES;
+      const bonusVerb = roundBonus < 0 ? "" : "+";
 
       if (isWin) {
         return {
           ...prev,
           guesses: nextGuesses,
-          creditedCorrectLetters: [...newlyCorrectLetters],
+          creditedBonusByChar: nextCreditedBonusByChar,
           currentTrace: [],
           score: nextScore,
           gameState: "WON",
-          statusMessage: `Signal locked! +${roundBonus} bonus. The word was ${prev.solution}.`,
+          statusMessage: `Signal locked! ${bonusVerb}${roundBonus} bonus. The word was ${prev.solution}.`,
         };
       }
 
@@ -207,7 +246,7 @@ export default function App() {
         return {
           ...prev,
           guesses: nextGuesses,
-          creditedCorrectLetters: [...newlyCorrectLetters],
+          creditedBonusByChar: nextCreditedBonusByChar,
           currentTrace: [],
           score: nextScore,
           gameState: "LOST",
@@ -219,11 +258,11 @@ export default function App() {
       return {
         ...prev,
         guesses: nextGuesses,
-        creditedCorrectLetters: [...newlyCorrectLetters],
+        creditedBonusByChar: nextCreditedBonusByChar,
         currentTrace: [],
         shakeId: prev.shakeId + 1,
         score: nextScore,
-        statusMessage: `+${roundBonus} bonus banked. Keep tracing.`,
+        statusMessage: `${bonusVerb}${roundBonus} bonus banked. Keep tracing.`,
       };
     });
   }, []);
@@ -249,6 +288,31 @@ export default function App() {
     setState(createInitialState());
   }, []);
 
+  const [shareCopied, setShareCopied] = useState(false);
+
+  const handleShare = useCallback(() => {
+    const emojiRows = guesses
+      .map((g) =>
+        g.statuses
+          .map((s) =>
+            s === "correct"
+              ? "\uD83D\uDFE9"
+              : s === "present"
+                ? "\uD83D\uDFE8"
+                : "\u2B1C",
+          )
+          .join(""),
+      )
+      .join("\n");
+    const scoreTier = getScoreTier(score);
+    const shareText = `GeoTrace ${guesses.length}/${MAX_GUESSES} — ${score} pts (${scoreTier.tier} Tier)\n\n${emojiRows}`;
+
+    navigator.clipboard?.writeText(shareText).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    });
+  }, [guesses, score]);
+
   const multiplier = `${speedMultiplier(elapsedSeconds).toFixed(1)}x`;
 
   const rows = [];
@@ -268,6 +332,16 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      <button
+        type="button"
+        className="settings-button"
+        onClick={() => setShowSettings(true)}
+        aria-label="Open settings"
+        title="Settings"
+      >
+        <Settings size={18} />
+      </button>
+
       <div className="map-area">
         <WorldMap
           currentTrace={currentTrace}
@@ -374,6 +448,7 @@ export default function App() {
                 <Send size={16} />
                 Submit Guess
               </button>
+              <div>solution: {solution}</div>
             </div>
           </section>
         </div>
@@ -389,14 +464,44 @@ export default function App() {
               <p>
                 The word was <strong>{solution}</strong>.
               </p>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleReset}
-              >
-                <RotateCcw size={16} />
-                Play Again
-              </button>
+              {gameState === "WON" && (
+                <div
+                  className={`tier-badge tier-badge--${getScoreTier(score).tier.toLowerCase()}`}
+                >
+                  <span className="tier-badge-rank">
+                    {getScoreTier(score).tier}
+                  </span>
+                  <span className="tier-badge-label">
+                    {getScoreTier(score).label}
+                  </span>
+                </div>
+              )}
+              {gameState === "WON" && (
+                <p className="end-panel-score">
+                  <Star size={16} />
+                  <strong>{score}</strong> points
+                </p>
+              )}
+              <div className="end-panel-actions">
+                {gameState === "WON" && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleShare}
+                  >
+                    <Share2 size={16} />
+                    {shareCopied ? "Copied!" : "Share"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleReset}
+                >
+                  <RotateCcw size={16} />
+                  Play Again
+                </button>
+              </div>
             </section>
           </div>
         )}
@@ -531,15 +636,15 @@ export default function App() {
                   <div className="speed-tiers">
                     <div className="speed-tier speed-tier--fast">
                       <b>2.0x</b>
-                      <span>under 20 seconds</span>
+                      <span>under 30 seconds</span>
                     </div>
                     <div className="speed-tier speed-tier--steady">
                       <b>1.5x</b>
-                      <span>under 40 seconds</span>
+                      <span>under 60 seconds</span>
                     </div>
                     <div className="speed-tier">
                       <b>1.0x</b>
-                      <span>40 seconds and beyond</span>
+                      <span>60 seconds and beyond</span>
                     </div>
                   </div>
                 </div>
@@ -615,6 +720,34 @@ export default function App() {
             <p className="launch-kicker">GeoTrace uplink</p>
             <strong>Starting game</strong>
           </div>
+        </div>
+      )}
+
+      {showSettings && (
+        <div className="settings-backdrop" role="presentation">
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+          >
+            <div className="settings-heading">
+              <h2 id="settings-title">Settings</h2>
+              <button
+                type="button"
+                className="settings-close"
+                onClick={() => setShowSettings(false)}
+                aria-label="Close settings"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <p className="settings-label">Appearance</p>
+            </div>
+          </section>
         </div>
       )}
       <Analytics />
