@@ -305,7 +305,7 @@ export default function App() {
       )
       .join("\n");
     const scoreTier = getScoreTier(score);
-    const shareText = `GeoTrace ${guesses.length}/${MAX_GUESSES} — ${score} pts (${scoreTier.tier} Tier)\n\n${emojiRows}`;
+    const shareText = `GeoTrace ${guesses.length}/${MAX_GUESSES}\n${score} pts (${scoreTier.tier} Tier ${scoreTier.label})\n\n${emojiRows}`;
 
     navigator.clipboard?.writeText(shareText).then(() => {
       setShareCopied(true);
