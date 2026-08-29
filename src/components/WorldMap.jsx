@@ -10,48 +10,17 @@ import { MapPinned } from "lucide-react";
 import {
   MAP_WIDTH,
   MAP_HEIGHT,
-  BEACONS,
+  BEACONS as DEFAULT_BEACONS,
   WORD_LENGTH,
   HIT_RADIUS,
   computePrecisionBonus,
 } from "../gameLogic";
+import { LEVEL_ONE } from "../config/levels/levelone";
 
 const FLAG_LIFETIME_MS = 900;
-
-// Abstract sci-fi/fantasy landmass silhouettes, purely decorative.
-const ISLANDS = [
-  {
-    d: "M40,40 Q220,10 400,90 Q440,220 320,340 Q150,400 60,300 Q0,180 40,40 Z",
-    fill: "#101a2c",
-  },
-  {
-    d: "M420,30 Q650,0 800,120 Q820,250 680,330 Q500,360 440,240 Q400,120 420,30 Z",
-    fill: "#0f1826",
-  },
-  {
-    d: "M840,20 Q1060,10 1160,110 Q1180,240 1040,360 Q880,380 800,270 Q790,120 840,20 Z",
-    fill: "#101a2c",
-  },
-  {
-    d: "M30,460 Q220,440 380,540 Q420,680 280,830 Q120,870 40,760 Q0,600 30,460 Z",
-    fill: "#0f1826",
-  },
-  {
-    d: "M420,480 Q640,460 790,560 Q830,700 660,830 Q480,870 420,730 Q390,590 420,480 Z",
-    fill: "#101a2c",
-  },
-  {
-    d: "M840,470 Q1060,450 1160,560 Q1190,700 1030,830 Q860,870 800,740 Q790,590 840,470 Z",
-    fill: "#0f1826",
-  },
-];
-
-// Pointer must move less than this (px) between down/up to count as a click, not a pan.
 const CLICK_DRAG_THRESHOLD = 6;
-// WASD pan speed, in px/sec at 1x zoom.
 const PAN_SPEED = 900;
 
-// Keys mapped to their pan direction; inverted from arrow-key convention (W moves view up).
 const PAN_KEYS = {
   w: [0, 1],
   s: [0, -1],
@@ -60,10 +29,12 @@ const PAN_KEYS = {
 };
 
 export default function WorldMap({
-  currentTrace,
+  currentTrace = [],
   onSelectLetter,
   onNavigate,
-  disabled,
+  disabled = false,
+  level = LEVEL_ONE,
+  beacons = null,
 }) {
   const [flags, setFlags] = useState([]);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -71,12 +42,19 @@ export default function WorldMap({
   const pointerDownRef = useRef(null);
   const transformRef = useRef(null);
 
+  const activeBeacons = useMemo(
+    () => beacons || level?.beacons || DEFAULT_BEACONS,
+    [beacons, level],
+  );
+
+  const islands = useMemo(() => level?.islands || LEVEL_ONE.islands, [level]);
+  const theme = useMemo(() => level?.theme || LEVEL_ONE.theme, [level]);
+
   useEffect(() => {
     const timeouts = timeoutsRef.current;
     return () => timeouts.forEach((id) => clearTimeout(id));
   }, []);
 
-  // WASD pans the map smoothly; held keys combine into a normalized diagonal vector each frame.
   useEffect(() => {
     const pressedKeys = new Set();
     let animationFrameId = null;
@@ -176,7 +154,7 @@ export default function WorldMap({
 
       let closestBeacon = null;
       let closestDistance = Infinity;
-      for (const beacon of BEACONS) {
+      for (const beacon of activeBeacons) {
         const dxb = beacon.x - mapX;
         const dyb = beacon.y - mapY;
         const distance = Math.sqrt(dxb * dxb + dyb * dyb);
@@ -204,7 +182,6 @@ export default function WorldMap({
         return;
       }
 
-      // Re-clicking the same beacon repositions its flag instead of adding a duplicate.
       const isReposition = currentTrace.some(
         (t) => t.beacon.id === closestBeacon.id,
       );
@@ -218,12 +195,17 @@ export default function WorldMap({
       addFlag("hit", bonus);
       onSelectLetter(closestBeacon, { precision, bonus, isReposition });
     },
-    [disabled, currentTrace, onSelectLetter],
+    [disabled, currentTrace, onSelectLetter, activeBeacons],
   );
 
   return (
     <div
       className={`map-viewport${isNavigating ? " map-viewport--active" : ""}`}
+      style={{
+        "--level-pan-border": theme.panningBorder,
+        "--level-pan-glow": theme.panningGlow,
+        "--level-pan-glow-soft": theme.panningGlowSoft || theme.panningGlow,
+      }}
     >
       <TransformWrapper
         ref={transformRef}
@@ -253,7 +235,10 @@ export default function WorldMap({
         >
           <div
             className="world-map-canvas"
-            style={{ width: MAP_WIDTH, height: MAP_HEIGHT }}
+            style={{
+              width: MAP_WIDTH,
+              height: MAP_HEIGHT,
+            }}
             onPointerDown={handlePointerDown}
             onPointerUp={handlePointerUp}
           >
@@ -262,42 +247,162 @@ export default function WorldMap({
               width={MAP_WIDTH}
               height={MAP_HEIGHT}
               viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+              style={{
+                willChange: "transform",
+                transform: "translateZ(0)",
+              }}
             >
               <defs>
-                <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                  <feGaussianBlur stdDeviation="5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
+                {/* 1. Hardware-Accelerated 3D Lighting Gradients */}
+                <linearGradient
+                  id={`base-shelf-grad-${level.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  {theme.shelfGrad.stops.map((stop, idx) => (
+                    <stop
+                      key={idx}
+                      offset={stop.offset}
+                      stopColor={stop.color}
+                    />
+                  ))}
+                </linearGradient>
+
+                <linearGradient
+                  id={`plateau-grad-${level.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  {theme.plateauGrad.stops.map((stop, idx) => (
+                    <stop
+                      key={idx}
+                      offset={stop.offset}
+                      stopColor={stop.color}
+                    />
+                  ))}
+                </linearGradient>
+
+                <linearGradient
+                  id={`peak-grad-${level.id}`}
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  {theme.peakGrad.stops.map((stop, idx) => (
+                    <stop
+                      key={idx}
+                      offset={stop.offset}
+                      stopColor={stop.color}
+                    />
+                  ))}
+                </linearGradient>
+
+                {/* 2. Fast Coastal Shadow */}
+                <filter
+                  id={`ocean-shelf-shadow-${level.id}`}
+                  x="-20%"
+                  y="-20%"
+                  width="140%"
+                  height="140%"
+                >
+                  <feDropShadow
+                    dx="0"
+                    dy={theme.oceanShelfShadow.shadow1.dy}
+                    stdDeviation={theme.oceanShelfShadow.shadow1.stdDev}
+                    floodColor={theme.oceanShelfShadow.shadow1.color}
+                    floodOpacity={theme.oceanShelfShadow.shadow1.opacity}
+                  />
+                  <feDropShadow
+                    dx="0"
+                    dy={theme.oceanShelfShadow.shadow2.dy}
+                    stdDeviation={theme.oceanShelfShadow.shadow2.stdDev}
+                    floodColor={theme.oceanShelfShadow.shadow2.color}
+                    floodOpacity={theme.oceanShelfShadow.shadow2.opacity}
+                  />
+                </filter>
+
+                {/* 3. Fast Polyline Glow */}
+                <filter
+                  id={`trace-glow-${level.id}`}
+                  x="-20%"
+                  y="-20%"
+                  width="140%"
+                  height="140%"
+                >
+                  <feDropShadow
+                    dx="0"
+                    dy="0"
+                    stdDeviation="4"
+                    floodColor={theme.traceColor || theme.accentColor}
+                    floodOpacity="0.9"
+                  />
                 </filter>
               </defs>
 
-              {ISLANDS.map((island, i) => (
-                <path
-                  key={i}
-                  d={island.d}
-                  fill={island.fill}
-                  stroke="#1b2942"
-                  strokeWidth={2}
-                />
+              {/* Render Fast 3D Layered Islands */}
+              {islands.map((island) => (
+                <g
+                  key={island.id}
+                  filter={`url(#ocean-shelf-shadow-${level.id})`}
+                >
+                  {/* Layer 1: Base Landmass */}
+                  <path
+                    d={island.d}
+                    fill={`url(#base-shelf-grad-${level.id})`}
+                    stroke={theme.shelfStroke}
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    fillRule="evenodd"
+                  />
+
+                  {/* Layer 2: Mid-Tier Plateau */}
+                  {island.plateau && (
+                    <path
+                      d={island.plateau}
+                      fill={`url(#plateau-grad-${level.id})`}
+                      stroke={theme.plateauStroke}
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                      fillRule="evenodd"
+                      opacity="0.9"
+                    />
+                  )}
+
+                  {/* Layer 3: Top Peak Elevation */}
+                  {island.peak && (
+                    <path
+                      d={island.peak}
+                      fill={`url(#peak-grad-${level.id})`}
+                      stroke={theme.peakStroke}
+                      strokeWidth="1"
+                      strokeDasharray="3 3"
+                      strokeOpacity="0.7"
+                      fillRule="evenodd"
+                    />
+                  )}
+                </g>
               ))}
 
               {tracePoints && (
                 <polyline
                   points={tracePoints}
                   fill="none"
-                  stroke="#38bdf8"
+                  stroke={theme.traceColor || "#38bdf8"}
                   strokeWidth={3}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  filter="url(#glow)"
-                  opacity={0.9}
+                  filter={`url(#trace-glow-${level.id})`}
+                  opacity={0.95}
                 />
               )}
             </svg>
 
-            {BEACONS.map((beacon) => {
+            {activeBeacons.map((beacon) => {
               const traceEntry = currentTrace.find(
                 (t) => t.beacon.id === beacon.id,
               );
@@ -305,7 +410,20 @@ export default function WorldMap({
                 <div
                   key={beacon.id}
                   className={`beacon${traceEntry ? " beacon--selected" : ""}`}
-                  style={{ left: beacon.x, top: beacon.y }}
+                  style={{
+                    left: beacon.x,
+                    top: beacon.y,
+                    borderColor: traceEntry
+                      ? theme.accentColor
+                      : theme.beaconBorder,
+                    color: traceEntry ? "#06121c" : theme.beaconBorder,
+                    background: traceEntry
+                      ? theme.accentColor
+                      : theme.beaconBackground,
+                    boxShadow: traceEntry
+                      ? `0 0 22px ${theme.beaconGlow}, 0 0 6px #fff`
+                      : `0 0 10px ${theme.beaconGlow}`,
+                  }}
                   title={beacon.region}
                 >
                   {beacon.char}

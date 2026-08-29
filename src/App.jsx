@@ -1,11 +1,20 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Analytics } from "@vercel/analytics/react";
 import confetti from "canvas-confetti";
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
+  Compass,
   Delete,
+  Flame,
+  Layers,
   MapPin,
   Radio,
   Send,
@@ -24,7 +33,9 @@ import {
   WORD_LENGTH,
   evaluateGuess,
   pickRandomSolution,
+  generateBeacons,
 } from "./gameLogic";
+import { LEVELS, DEFAULT_LEVEL_ID, getLevelById } from "./config/levels";
 import "./App.css";
 
 // Rewards how fast each individual guess was submitted (not total game time),
@@ -84,9 +95,23 @@ function fireVictoryConfetti() {
   });
 }
 
-const THEME_STORAGE_KEY = "geotrace-theme";
+const LEVEL_STORAGE_KEY = "geotrace-selected-level";
 
 export default function App() {
+  const [levelId, setLevelId] = useState(() => {
+    try {
+      return localStorage.getItem(LEVEL_STORAGE_KEY) || DEFAULT_LEVEL_ID;
+    } catch {
+      return DEFAULT_LEVEL_ID;
+    }
+  });
+
+  const activeLevel = useMemo(() => getLevelById(levelId), [levelId]);
+  const levelBeacons = useMemo(
+    () => generateBeacons(activeLevel.regions, activeLevel.seed),
+    [activeLevel],
+  );
+
   const [state, setState] = useState(createInitialState);
   const [launchPhase, setLaunchPhase] = useState("TUTORIAL");
   const [showExploreHint, setShowExploreHint] = useState(true);
@@ -105,6 +130,14 @@ export default function App() {
   } = state;
   const statusTimeoutRef = useRef(null);
   const isPlaying = launchPhase === "PLAYING";
+
+  const handleSelectLevel = useCallback((id) => {
+    setLevelId(id);
+    try {
+      localStorage.setItem(LEVEL_STORAGE_KEY, id);
+    } catch {}
+    setState(createInitialState());
+  }, []);
 
   useEffect(() => {
     if (launchPhase !== "LAUNCHING") return undefined;
@@ -342,12 +375,17 @@ export default function App() {
         <Settings size={18} />
       </button>
 
-      <div className="map-area">
+      <div
+        className="map-area"
+        style={{ background: activeLevel.theme.oceanBg }}
+      >
         <WorldMap
           currentTrace={currentTrace}
           onSelectLetter={handleSelectLetter}
           onNavigate={() => setShowExploreHint(false)}
           disabled={!isPlaying || gameState !== "PLAYING"}
+          level={activeLevel}
+          beacons={levelBeacons}
         />
         <div className="map-timer" title="Elapsed time">
           <Timer size={20} />
@@ -745,7 +783,45 @@ export default function App() {
             </div>
 
             <div className="settings-section">
-              <p className="settings-label">Appearance</p>
+              <p className="settings-label">Select Level</p>
+              <div className="level-select-grid">
+                {LEVELS.map((lvl) => {
+                  const isActive = lvl.id === levelId;
+                  return (
+                    <button
+                      key={lvl.id}
+                      type="button"
+                      className={`level-card${isActive ? " level-card--active" : ""}`}
+                      style={{
+                        "--level-card-accent": lvl.theme.accentColor,
+                        "--level-card-glow": lvl.theme.panningGlow,
+                      }}
+                      onClick={() => handleSelectLevel(lvl.id)}
+                    >
+                      <div className="level-card-left">
+                        <div className="level-card-icon">
+                          {lvl.id === "leveltwo" ? (
+                            <Flame size={18} />
+                          ) : (
+                            <Compass size={18} />
+                          )}
+                        </div>
+                        <div className="level-card-info">
+                          <span className="level-card-name">{lvl.name}</span>
+                          <span className="level-card-subtitle">
+                            {lvl.subtitle}
+                          </span>
+                        </div>
+                      </div>
+                      <span
+                        className={`level-card-badge${isActive ? " level-card-badge--active" : ""}`}
+                      >
+                        {isActive ? "Active" : "Select"}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </section>
         </div>

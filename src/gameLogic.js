@@ -133,11 +133,13 @@ const LETTER_POOL = [
   "Q",
 ];
 
-function generateBeacons() {
+export function generateBeacons(customRegions = REGIONS, seed = 0) {
+  const regions =
+    customRegions && customRegions.length > 0 ? customRegions : REGIONS;
   // Group letters by their assigned region while keeping the original round-robin mapping.
-  const regionGroups = REGIONS.map(() => []);
+  const regionGroups = regions.map(() => []);
   LETTER_POOL.forEach((char, index) => {
-    regionGroups[index % REGIONS.length].push({ char, index });
+    regionGroups[index % regions.length].push({ char, index });
   });
 
   const beaconDiameter = BEACON_RADIUS * 2;
@@ -145,7 +147,7 @@ function generateBeacons() {
   const beacons = [];
 
   regionGroups.forEach((group, regionIndex) => {
-    const region = REGIONS[regionIndex];
+    const region = regions[regionIndex];
     const count = group.length;
     const cols = Math.ceil(Math.sqrt(count));
     const rows = Math.ceil(count / cols);
@@ -159,8 +161,9 @@ function generateBeacons() {
     group.forEach((item, i) => {
       const col = i % cols;
       const row = Math.floor(i / cols);
-      const rx = seededRandom(item.index * 2 + 1) * 2 - 1;
-      const ry = seededRandom(item.index * 2 + 2) * 2 - 1;
+      const seedOffset = seed ? seed * 100 : 0;
+      const rx = seededRandom(item.index * 2 + 1 + seedOffset) * 2 - 1;
+      const ry = seededRandom(item.index * 2 + 2 + seedOffset) * 2 - 1;
       const x = Math.round(
         region.x0 + pad + (col + 0.5) * cellW + rx * maxJitterX,
       );
