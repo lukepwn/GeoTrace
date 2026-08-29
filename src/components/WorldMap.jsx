@@ -41,6 +41,7 @@ export default function WorldMap({
   const timeoutsRef = useRef(new Set());
   const pointerDownRef = useRef(null);
   const transformRef = useRef(null);
+  const svgRef = useRef(null);
 
   const activeBeacons = useMemo(
     () => beacons || level?.beacons || DEFAULT_BEACONS,
@@ -135,7 +136,11 @@ export default function WorldMap({
   );
 
   const handlePointerDown = useCallback((event) => {
-    pointerDownRef.current = { x: event.clientX, y: event.clientY };
+    pointerDownRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      pointerType: event.pointerType,
+    };
   }, []);
 
   const handlePointerUp = useCallback(
@@ -144,13 +149,33 @@ export default function WorldMap({
       pointerDownRef.current = null;
       if (disabled || !start) return;
 
+      const threshold =
+        start.pointerType === "touch" ? 14 : CLICK_DRAG_THRESHOLD;
       const dx = event.clientX - start.x;
       const dy = event.clientY - start.y;
-      if (Math.sqrt(dx * dx + dy * dy) > CLICK_DRAG_THRESHOLD) return;
+      if (Math.hypot(dx, dy) > threshold) return;
 
-      const rect = event.currentTarget.getBoundingClientRect();
-      const mapX = ((event.clientX - rect.left) / rect.width) * MAP_WIDTH;
-      const mapY = ((event.clientY - rect.top) / rect.height) * MAP_HEIGHT;
+      let mapX;
+      let mapY;
+
+      if (svgRef.current?.getScreenCTM) {
+        const svg = svgRef.current;
+        const ctm = svg.getScreenCTM();
+        if (ctm) {
+          const pt = svg.createSVGPoint();
+          pt.x = event.clientX;
+          pt.y = event.clientY;
+          const svgP = pt.matrixTransform(ctm.inverse());
+          mapX = svgP.x;
+          mapY = svgP.y;
+        }
+      }
+
+      if (mapX === undefined || mapY === undefined) {
+        const rect = event.currentTarget.getBoundingClientRect();
+        mapX = ((event.clientX - rect.left) / rect.width) * MAP_WIDTH;
+        mapY = ((event.clientY - rect.top) / rect.height) * MAP_HEIGHT;
+      }
 
       let closestBeacon = null;
       let closestDistance = Infinity;
@@ -243,6 +268,7 @@ export default function WorldMap({
             onPointerUp={handlePointerUp}
           >
             <svg
+              ref={svgRef}
               className="world-map-svg"
               width={MAP_WIDTH}
               height={MAP_HEIGHT}
