@@ -14,6 +14,7 @@ import {
   Flame,
   ArrowRight,
   Zap,
+  MessageSquare,
 } from "lucide-react";
 import { LEVELS } from "../config/levels";
 
@@ -34,6 +35,7 @@ export default function PlayModal({
   onOpenLeaderboard,
   onOpenStats,
   onOpenAuth,
+  onOpenFeedback,
 }) {
   if (!isOpen) return null;
 
@@ -203,6 +205,19 @@ export default function PlayModal({
             </div>
           </button>
         </div>
+
+        {onOpenFeedback && (
+          <div className="play-footer-actions">
+            <button
+              type="button"
+              className="play-feedback-btn"
+              onClick={onOpenFeedback}
+            >
+              <MessageSquare size={13} />
+              <span>Send Feedback or Report an Issue</span>
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

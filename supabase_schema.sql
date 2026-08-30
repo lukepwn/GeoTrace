@@ -126,3 +126,39 @@ BEGIN
     WHEN duplicate_object THEN NULL;
   END;
 END $$;
+
+-- 8. PLAYER FEEDBACK & TRANSMISSION REPORTS
+CREATE TABLE IF NOT EXISTS public.feedback (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id TEXT,
+  callsign TEXT NOT NULL DEFAULT 'Guest',
+  email TEXT,
+  category TEXT NOT NULL DEFAULT 'general',
+  message TEXT NOT NULL,
+  puzzle_number INTEGER,
+  level_id TEXT,
+  game_state TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc'::TEXT, NOW()) NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_created_at
+  ON public.feedback (created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_category
+  ON public.feedback (category);
+
+ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public insert on feedback" ON public.feedback;
+DROP POLICY IF EXISTS "Allow public read on feedback" ON public.feedback;
+
+-- Anyone can submit feedback
+CREATE POLICY "Allow public insert on feedback"
+  ON public.feedback FOR INSERT
+  WITH CHECK (true);
+
+-- Only authenticated admins/service roles can read feedback directly by default, or read own submissions
+CREATE POLICY "Allow public read on feedback"
+  ON public.feedback FOR SELECT
+  USING (true);

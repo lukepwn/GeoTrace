@@ -33,12 +33,14 @@ import {
   X,
   Zap,
   Sparkles,
+  MessageSquare,
 } from "lucide-react";
 import WorldMap from "./components/WorldMap.jsx";
 import LeaderboardModal from "./components/LeaderboardModal.jsx";
 import StatsModal from "./components/StatsModal.jsx";
 import AuthModal from "./components/AuthModal.jsx";
 import PlayModal from "./components/PlayModal.jsx";
+import FeedbackModal from "./components/FeedbackModal.jsx";
 import {
   ALLOWED_GUESSES,
   MAX_GUESSES,
@@ -253,6 +255,15 @@ export default function App() {
   const [authOpenedFromLeaderboard, setAuthOpenedFromLeaderboard] =
     useState(false);
   const [authOpenedFromPlay, setAuthOpenedFromPlay] = useState(false);
+
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackInitialCategory, setFeedbackInitialCategory] =
+    useState("general");
+  const [feedbackOpenedFromSettings, setFeedbackOpenedFromSettings] =
+    useState(false);
+  const [feedbackOpenedFromPlay, setFeedbackOpenedFromPlay] = useState(false);
+  const [feedbackOpenedFromEnd, setFeedbackOpenedFromEnd] = useState(false);
+
   const [activeProfile, setActiveProfile] = useState(() => getPlayerProfile());
   const [countdown, setCountdown] = useState(
     () => getTimeUntilNextPuzzle().formatted,
@@ -273,6 +284,7 @@ export default function App() {
     showLeaderboard ||
     showStats ||
     showAuthModal ||
+    showFeedbackModal ||
     (state.gameState !== "PLAYING" && showEndModal),
   );
 
@@ -416,6 +428,58 @@ export default function App() {
       setShowPlayMenu(true);
     }
   }, [authOpenedFromSettings, authOpenedFromLeaderboard, authOpenedFromPlay]);
+
+  const handleOpenFeedback = useCallback(
+    (
+      category = "general",
+      fromSettings = false,
+      fromPlay = false,
+      fromEnd = false,
+    ) => {
+      if (fromSettings) {
+        setShowSettings(false);
+        setFeedbackOpenedFromSettings(true);
+      } else {
+        setFeedbackOpenedFromSettings(false);
+      }
+
+      if (fromPlay) {
+        setShowPlayMenu(false);
+        setFeedbackOpenedFromPlay(true);
+      } else {
+        setFeedbackOpenedFromPlay(false);
+      }
+
+      if (fromEnd) {
+        setShowEndModal(false);
+        setFeedbackOpenedFromEnd(true);
+      } else {
+        setFeedbackOpenedFromEnd(false);
+      }
+
+      setFeedbackInitialCategory(category);
+      setShowFeedbackModal(true);
+    },
+    [],
+  );
+
+  const handleCloseFeedback = useCallback(() => {
+    setShowFeedbackModal(false);
+    if (feedbackOpenedFromSettings) {
+      setFeedbackOpenedFromSettings(false);
+      setShowSettings(true);
+    } else if (feedbackOpenedFromPlay) {
+      setFeedbackOpenedFromPlay(false);
+      setShowPlayMenu(true);
+    } else if (feedbackOpenedFromEnd) {
+      setFeedbackOpenedFromEnd(false);
+      setShowEndModal(true);
+    }
+  }, [
+    feedbackOpenedFromSettings,
+    feedbackOpenedFromPlay,
+    feedbackOpenedFromEnd,
+  ]);
 
   const handleSignOut = useCallback(async () => {
     await signOut();
@@ -726,6 +790,9 @@ export default function App() {
       } else if (showStats) {
         event.preventDefault();
         handleCloseStats();
+      } else if (showFeedbackModal) {
+        event.preventDefault();
+        handleCloseFeedback();
       } else if (showSettings) {
         event.preventDefault();
         setShowSettings(false);
@@ -741,11 +808,13 @@ export default function App() {
     showEndModal,
     gameState,
     showAuthModal,
+    showFeedbackModal,
     showTutorial,
     showSettings,
     showLeaderboard,
     showStats,
     handleCloseAuth,
+    handleCloseFeedback,
     handleCloseTutorial,
     handleCloseLeaderboard,
     handleCloseStats,
@@ -1190,6 +1259,30 @@ export default function App() {
                     Career Stats
                   </button>
                 </div>
+              </div>
+
+              <div className="end-panel-feedback-row">
+                <button
+                  type="button"
+                  className="end-feedback-card"
+                  onClick={() =>
+                    handleOpenFeedback("puzzle_issue", false, false, true)
+                  }
+                  title="Submit feedback or report an issue on today's puzzle"
+                >
+                  <div className="end-feedback-card-left">
+                    <div className="end-feedback-card-icon">
+                      <MessageSquare size={16} />
+                    </div>
+                    <div className="end-feedback-card-text">
+                      <span className="end-feedback-card-title">Feedback?</span>
+                      <span className="end-feedback-card-sub">
+                        Report beacon issues, coordinate bugs, or suggestions
+                      </span>
+                    </div>
+                  </div>
+                  <span className="end-feedback-card-badge">Send</span>
+                </button>
               </div>
             </section>
           </div>
@@ -1668,6 +1761,32 @@ export default function App() {
                 })}
               </div>
             </div>
+
+            <div className="settings-section">
+              <p className="settings-label">Support & Feedback</p>
+              <button
+                type="button"
+                className="settings-card"
+                onClick={() =>
+                  handleOpenFeedback("general", true, false, false)
+                }
+              >
+                <div className="settings-card-left">
+                  <div className="settings-card-icon">
+                    <MessageSquare size={18} />
+                  </div>
+                  <div className="settings-card-info">
+                    <span className="settings-card-name">
+                      Send Feedback & Bug Reports
+                    </span>
+                    <span className="settings-card-subtitle">
+                      Report glitches, coordinate issues, or suggest features
+                    </span>
+                  </div>
+                </div>
+                <span className="settings-card-badge">Send</span>
+              </button>
+            </div>
           </section>
         </div>
       )}
@@ -1690,6 +1809,7 @@ export default function App() {
         onOpenLeaderboard={() => handleOpenLeaderboard(false, true)}
         onOpenStats={() => handleOpenStats(false, true)}
         onOpenAuth={(tab) => handleOpenAuth(tab, false, false, true)}
+        onOpenFeedback={() => handleOpenFeedback("general", false, true, false)}
       />
 
       {/* Leaderboard Modal */}
@@ -1717,6 +1837,20 @@ export default function App() {
         onClose={handleCloseAuth}
         initialTab={authModalTab}
         onAuthSuccess={(p) => setActiveProfile(p)}
+      />
+
+      {/* Transmission Feedback & Bug Reporting Modal */}
+      <FeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={handleCloseFeedback}
+        initialCategory={feedbackInitialCategory}
+        profile={activeProfile}
+        puzzleNumber={puzzleNumber}
+        levelId={levelId}
+        levelName={activeLevel.name}
+        gameState={gameState}
+        elapsedSeconds={elapsedSeconds}
+        guessesCount={guesses.length}
       />
 
       <Analytics />
