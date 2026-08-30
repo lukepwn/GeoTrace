@@ -11,12 +11,15 @@ import {
   ArrowRight,
   BarChart2,
   BookOpen,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Compass,
   Delete,
   Flame,
+  History,
   MapPin,
   Send,
   Settings,
@@ -196,6 +199,8 @@ export default function App() {
   const [countdown, setCountdown] = useState(
     () => getTimeUntilNextPuzzle().formatted,
   );
+  const [showMobileHistory, setShowMobileHistory] = useState(false);
+  const mobileHistoryTimeoutRef = useRef(null);
 
   const settingsBackdropMouseDownRef = useRef(false);
   const tutorialBackdropMouseDownRef = useRef(false);
@@ -455,6 +460,8 @@ export default function App() {
   }, []);
 
   const handleSelectLetter = useCallback((beacon, meta) => {
+    clearTimeout(mobileHistoryTimeoutRef.current);
+    setShowMobileHistory(false);
     setState((prev) => {
       if (prev.gameState !== "PLAYING") return prev;
 
@@ -562,9 +569,17 @@ export default function App() {
       if (isWin) {
         nextGameState = "WON";
         nextStatusMessage = `Signal locked! ${bonusVerb}${roundBonus} bonus. The word was ${prev.solution}.`;
+        setShowMobileHistory(false);
       } else if (isLastGuess) {
         nextGameState = "LOST";
         nextStatusMessage = `Out of guesses. The word was ${prev.solution}.`;
+        setShowMobileHistory(false);
+      } else {
+        setShowMobileHistory(true);
+        clearTimeout(mobileHistoryTimeoutRef.current);
+        mobileHistoryTimeoutRef.current = setTimeout(() => {
+          setShowMobileHistory(false);
+        }, 3500);
       }
 
       const nextState = {
@@ -750,11 +765,23 @@ export default function App() {
       <div
         className="map-area"
         style={{ background: activeLevel.theme.oceanBg }}
+        onClick={() => {
+          if (showMobileHistory) {
+            clearTimeout(mobileHistoryTimeoutRef.current);
+            setShowMobileHistory(false);
+          }
+        }}
       >
         <WorldMap
           currentTrace={currentTrace}
           onSelectLetter={handleSelectLetter}
-          onNavigate={() => setShowExploreHint(false)}
+          onNavigate={() => {
+            setShowExploreHint(false);
+            if (showMobileHistory) {
+              clearTimeout(mobileHistoryTimeoutRef.current);
+              setShowMobileHistory(false);
+            }
+          }}
           disabled={gameState !== "PLAYING" || isAnyModalOpen}
           level={activeLevel}
           beacons={levelBeacons}
@@ -772,12 +799,25 @@ export default function App() {
 
         <div className="right-dock">
           <header className="hud-float">
+            <button
+              type="button"
+              className="hud-settings-btn"
+              onClick={() => setShowSettings(true)}
+              aria-label="Open settings"
+              title="Settings"
+            >
+              <Settings size={16} />
+            </button>
             <div className="hud-title-wrap">
               <div className="hud-title">
                 <MapPin size={20} className="hud-icon" />
                 <h1>GeoTrace</h1>
               </div>
               <span className="hud-puzzle-pill">#{puzzleNumber}</span>
+            </div>
+            <div className="hud-mobile-timer" title="Elapsed time">
+              <Timer size={13} />
+              <span>{formatStopwatch(elapsedSeconds)}</span>
             </div>
             <div className="hud-badges">
               <div className="badge badge-score" title="Precision bonus score">
@@ -791,11 +831,38 @@ export default function App() {
             </div>
           </header>
 
+          {/* Mobile Guess History Backdrop */}
+          {showMobileHistory && (
+            <div
+              className="mobile-history-backdrop"
+              onClick={() => {
+                clearTimeout(mobileHistoryTimeoutRef.current);
+                setShowMobileHistory(false);
+              }}
+            />
+          )}
+
           <section
-            className={`deduction-grid${shakeId > 0 ? " deduction-grid--wrong" : ""}`}
+            className={`deduction-grid${shakeId > 0 ? " deduction-grid--wrong" : ""}${showMobileHistory ? " deduction-grid--mobile-open" : ""}`}
             aria-label="Guess history"
             key={shakeId}
           >
+            <div className="mobile-grid-header">
+              <span className="mobile-grid-title">
+                Guess History ({guesses.length}/{MAX_GUESSES})
+              </span>
+              <button
+                type="button"
+                className="mobile-grid-close"
+                onClick={() => {
+                  clearTimeout(mobileHistoryTimeoutRef.current);
+                  setShowMobileHistory(false);
+                }}
+                aria-label="Close guess history"
+              >
+                <X size={15} />
+              </button>
+            </div>
             {rows.map((row, rowIndex) => (
               <div
                 className={`grid-row${row.active ? " grid-row--active" : ""}`}
@@ -818,7 +885,29 @@ export default function App() {
           </section>
 
           <section className="action-dock">
-            <p className="status-message">{statusMessage}</p>
+            <div className="action-dock-header">
+              <p className="status-message">{statusMessage}</p>
+              <button
+                type="button"
+                className={`mobile-history-toggle-btn${showMobileHistory ? " active" : ""}${guesses.length > 0 ? " has-guesses" : ""}`}
+                onClick={() => {
+                  clearTimeout(mobileHistoryTimeoutRef.current);
+                  setShowMobileHistory((prev) => !prev);
+                }}
+                aria-label="Toggle guess history"
+                title="Guess History"
+              >
+                <History size={13} />
+                <span>
+                  Guesses ({guesses.length}/{MAX_GUESSES})
+                </span>
+                {showMobileHistory ? (
+                  <ChevronDown size={13} />
+                ) : (
+                  <ChevronUp size={13} />
+                )}
+              </button>
+            </div>
             <div className="trace-path">
               {Array.from({ length: WORD_LENGTH }).map((_, i) => (
                 <span
@@ -1096,10 +1185,10 @@ export default function App() {
                 <div className="score-callout">
                   <Star size={22} aria-hidden="true" />
                   <div>
-                    <strong>Precision bonus: 0 to 50 points</strong>
+                    <strong>Precision bonus: 30 to 50 points</strong>
                     <span>
-                      Place your flag near a beacon center for the biggest
-                      score.
+                      Base 30 points for each beacon hit + up to 20 points for
+                      landing near the center.
                     </span>
                   </div>
                 </div>

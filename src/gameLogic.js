@@ -11,18 +11,20 @@ export const WORD_LENGTH = 5;
 export const BEACON_RADIUS = 20;
 export const FLAG_RADIUS = 16;
 export const HIT_RADIUS = BEACON_RADIUS + FLAG_RADIUS;
+export const BASE_BEACON_BONUS = 30;
+export const MAX_CENTER_BONUS = 20;
 export const MAX_PRECISION_BONUS = 50;
 
 /**
  * Converts a flag's distance from a beacon's center into a precision bonus.
- * A dead-center flag earns the full MAX_PRECISION_BONUS; precision decays to
- * 0 once the flag is BEACON_RADIUS units or further from the center.
+ * Hitting any beacon awards a base of 30 points, plus up to 20 additional precision
+ * points for landing close to dead-center (30 to 50 total points per letter).
  * @param {number} distance
  * @returns {{ precision: number, bonus: number }}
  */
 export function computePrecisionBonus(distance) {
   const precision = Math.max(0, 1 - distance / BEACON_RADIUS);
-  const bonus = Math.round(precision * MAX_PRECISION_BONUS);
+  const bonus = BASE_BEACON_BONUS + Math.round(precision * MAX_CENTER_BONUS);
   return { precision, bonus };
 }
 
