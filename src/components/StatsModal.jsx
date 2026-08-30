@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import {
   BarChart2,
   ChevronLeft,
@@ -15,22 +15,31 @@ export default function StatsModal({
   onClose,
   isOpenedFromSettings = false,
 }) {
+  const backdropMouseDownRef = useRef(false);
+
   if (!isOpen) return null;
 
   const stats = getPlayerStats();
   const winRate =
-    stats.gamesPlayed > 0
+    stats && stats.gamesPlayed > 0
       ? Math.round((stats.gamesWon / stats.gamesPlayed) * 100)
       : 0;
 
-  const maxDistribution = Math.max(1, ...stats.winDistribution);
+  const winDistribution = stats?.winDistribution || [0, 0, 0, 0, 0, 0];
+  const maxDistribution = Math.max(1, ...winDistribution);
 
   return (
     <div
       className="stats-backdrop"
       role="presentation"
+      onMouseDown={(e) => {
+        backdropMouseDownRef.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (backdropMouseDownRef.current && e.target === e.currentTarget) {
+          onClose();
+        }
+        backdropMouseDownRef.current = false;
       }}
     >
       <section
@@ -109,7 +118,7 @@ export default function StatsModal({
         <div className="stats-distribution-section">
           <h3 className="distribution-title">Guess Distribution</h3>
           <div className="distribution-bars">
-            {stats.winDistribution.map((count, index) => {
+            {winDistribution.map((count, index) => {
               const guessNum = index + 1;
               const percentage =
                 count > 0

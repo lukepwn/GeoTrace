@@ -1,6 +1,7 @@
 // Leaderboard Service for GeoTrace
-// Provides daily score tracking, player ranking, and pluggable backend support (Local/Mock + Cloud adapters).
+// Provides daily score tracking, player ranking, Supabase cloud persistence, and fallback community simulation.
 import { getPlayerProfile, getTodayDateKey } from "./dailyGame";
+import { supabase } from "./supabase";
 
 const LEADERBOARD_HISTORY_KEY = "geotrace_leaderboard_history";
 
@@ -121,31 +122,104 @@ function saveLocalSubmission(key, entry) {
 }
 
 /**
- * Fetch daily leaderboard for a given date and level
- * Combines community entries with the current user's submitted score and computes live ranks.
+ * Fetch daily leaderboard for a given date and level from Supabase (with resilient fallback)
  * @param {string} [dateKey]
  * @param {string} [levelId]
- * @returns {Promise<{ leaderboard: Array<object>, userRank: number|null, userEntry: object|null, totalPlayers: number }>}
+ * @returns {Promise<{ leaderboard: Array<object>, userRank: number|null, userEntry: object|null, totalPlayers: number, isLive: boolean }>}
  */
 export async function fetchDailyLeaderboard(
   dateKey = getTodayDateKey(),
   levelId = "levelone",
 ) {
   const profile = getPlayerProfile();
-  const communityEntries = generateDailyCommunityScores(dateKey, levelId);
+  const isRegistered = Boolean(profile.isRegistered);
   const localHistory = getLocalSubmissionHistory();
   const submissionKey = `${dateKey}_${levelId}`;
-  const userSubmission =
+  const localUserSubmission =
     localHistory[submissionKey] ||
     (levelId === "levelone" ? localHistory[dateKey] : null) ||
     null;
 
-  let allEntries = [...communityEntries];
+  let liveEntries = [];
+  let isLive = false;
 
-  if (userSubmission) {
-    userSubmission.playerName = profile.callsign;
-    userSubmission.isCurrentUser = true;
-    allEntries.push(userSubmission);
+  // 1. Try querying Supabase if available (contains verified registered scores)
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("leaderboard_entries")
+        .select("*")
+        .eq("date_key", dateKey)
+        .eq("level_id", levelId)
+        .order("score", { ascending: false })
+        .order("guesses_count", { ascending: true })
+        .order("time_seconds", { ascending: true })
+        .limit(100);
+
+      if (!error && Array.isArray(data)) {
+        isLive = true;
+        liveEntries = data.map((d) => ({
+          id: d.id,
+          userId: d.user_id,
+          playerName: d.player_name,
+          levelId: d.level_id,
+          puzzleNumber: d.puzzle_number,
+          dateKey: d.date_key,
+          score: d.score,
+          guessesCount: d.guesses_count,
+          timeSeconds: d.time_seconds,
+          tier: d.tier,
+          gameState: d.game_state,
+          submittedAt: d.submitted_at,
+          isCurrentUser: isRegistered && d.user_id === profile.id,
+          isRegistered: true,
+        }));
+      }
+    } catch (err) {
+      console.warn("Supabase leaderboard query notice:", err);
+    }
+  }
+
+  let allEntries = [];
+
+  if (liveEntries.length > 0) {
+    allEntries = [...liveEntries];
+
+    // Check if the current registered user is already present in liveEntries
+    const userAlreadyInList = allEntries.some((e) => e.isCurrentUser);
+
+    // If current user is not in top list but has a local submission (guest or outside top 100):
+    if (!userAlreadyInList && localUserSubmission) {
+      allEntries.push({
+        ...localUserSubmission,
+        playerName: profile.callsign,
+        isCurrentUser: true,
+        isRegistered,
+      });
+    }
+
+    // If total real players is small (< 10), backfill with non-colliding simulated scores
+    if (allEntries.length < 10) {
+      const communityEntries = generateDailyCommunityScores(dateKey, levelId);
+      const existingUserIds = new Set(allEntries.map((e) => e.userId));
+      const backfill = communityEntries
+        .filter((c) => !existingUserIds.has(c.userId))
+        .slice(0, 10 - allEntries.length);
+      allEntries.push(...backfill);
+    }
+  } else {
+    // Fallback: simulated community entries + local user entry
+    const communityEntries = generateDailyCommunityScores(dateKey, levelId);
+    allEntries = [...communityEntries];
+
+    if (localUserSubmission) {
+      allEntries.push({
+        ...localUserSubmission,
+        playerName: profile.callsign,
+        isCurrentUser: true,
+        isRegistered,
+      });
+    }
   }
 
   // Sort: 1) Score descending, 2) Guesses ascending, 3) Time ascending
@@ -162,8 +236,14 @@ export async function fetchDailyLeaderboard(
 
   const rankedList = allEntries.map((entry, index) => {
     const rank = index + 1;
-    const rankedEntry = { ...entry, rank };
-    if (entry.userId === profile.id || entry.isCurrentUser) {
+    const isMe = Boolean(entry.isCurrentUser);
+    const rankedEntry = {
+      ...entry,
+      rank,
+      isCurrentUser: isMe,
+      playerName: isMe ? profile.callsign : entry.playerName,
+    };
+    if (isMe) {
       userRank = rank;
       userEntry = rankedEntry;
     }
@@ -175,6 +255,7 @@ export async function fetchDailyLeaderboard(
     userRank,
     userEntry,
     totalPlayers: rankedList.length,
+    isLive,
   };
 }
 
@@ -193,6 +274,7 @@ export async function fetchDailyLeaderboard(
  */
 export async function submitDailyScore(scorePayload) {
   const profile = getPlayerProfile();
+  const isRegistered = Boolean(profile.isRegistered);
   const {
     dateKey,
     levelId = "levelone",
@@ -217,10 +299,38 @@ export async function submitDailyScore(scorePayload) {
     tier,
     gameState,
     isCurrentUser: true,
+    isRegistered,
+    claimedByUserId: isRegistered ? profile.id : null,
     submittedAt: new Date().toISOString(),
   };
 
+  // 1. Always save locally
   saveLocalSubmission(`${dateKey}_${levelId}`, entry);
+
+  // 2. Upsert to Supabase ONLY if registered (guests are kept local)
+  if (supabase && isRegistered) {
+    try {
+      await supabase.from("leaderboard_entries").upsert(
+        {
+          id: entry.id,
+          user_id: profile.id,
+          player_name: profile.callsign,
+          level_id: entry.levelId,
+          puzzle_number: entry.puzzleNumber,
+          date_key: entry.dateKey,
+          score: entry.score,
+          guesses_count: entry.guessesCount,
+          time_seconds: entry.timeSeconds,
+          tier: entry.tier,
+          game_state: entry.gameState,
+          submitted_at: entry.submittedAt,
+        },
+        { onConflict: "user_id,date_key,level_id" },
+      );
+    } catch (err) {
+      console.warn("Supabase score submission notice:", err);
+    }
+  }
 
   const result = await fetchDailyLeaderboard(dateKey, levelId);
   return {

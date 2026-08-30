@@ -18,19 +18,23 @@ import {
   Delete,
   Flame,
   MapPin,
-  Radio,
   Send,
   Settings,
   Share2,
+  ShieldCheck,
   Star,
   Timer,
   Trophy,
+  User,
+  LogOut,
   X,
   Zap,
 } from "lucide-react";
 import WorldMap from "./components/WorldMap.jsx";
 import LeaderboardModal from "./components/LeaderboardModal.jsx";
 import StatsModal from "./components/StatsModal.jsx";
+import AuthModal from "./components/AuthModal.jsx";
+import PlayModal from "./components/PlayModal.jsx";
 import {
   ALLOWED_GUESSES,
   MAX_GUESSES,
@@ -45,8 +49,10 @@ import {
   recordGameResult,
   getTimeUntilNextPuzzle,
   getTodayDateKey,
+  getPlayerProfile,
 } from "./services/dailyGame";
 import { submitDailyScore } from "./services/leaderboardService";
+import { signOut, onAuthStateChange } from "./services/authService";
 import { LEVELS, DEFAULT_LEVEL_ID, getLevelById } from "./config/levels";
 import "./App.css";
 
@@ -152,37 +158,22 @@ export default function App() {
     };
   });
 
-  const [showTutorial, setShowTutorial] = useState(() => {
+  const [showPlayMenu, setShowPlayMenu] = useState(() => {
     try {
-      const tutorialSeen = localStorage.getItem("geotrace_tutorial_seen");
-      const saved = getSavedDailyState(dateKey);
+      const initialLevel =
+        localStorage.getItem(LEVEL_STORAGE_KEY) || DEFAULT_LEVEL_ID;
+      const saved = getSavedDailyState(dateKey, initialLevel);
       if (saved && (saved.gameState === "WON" || saved.gameState === "LOST")) {
         return false;
       }
-      return !tutorialSeen;
+      return true;
     } catch {
       return true;
     }
   });
 
-  const [launchPhase, setLaunchPhase] = useState(() => {
-    try {
-      const tutorialSeen = localStorage.getItem("geotrace_tutorial_seen");
-      const saved = getSavedDailyState(dateKey);
-      if (saved && (saved.gameState === "WON" || saved.gameState === "LOST")) {
-        return "PLAYING";
-      }
-      if (tutorialSeen) {
-        return "PLAYING";
-      }
-      return "INITIAL";
-    } catch {
-      return "INITIAL";
-    }
-  });
-
-  const [tutorialOpenedFromSettings, setTutorialOpenedFromSettings] =
-    useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialSource, setTutorialSource] = useState("play");
   const [showExploreHint, setShowExploreHint] = useState(true);
   const [tutorialPage, setTutorialPage] = useState(0);
 
@@ -190,11 +181,40 @@ export default function App() {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [leaderboardOpenedFromSettings, setLeaderboardOpenedFromSettings] =
     useState(false);
+  const [leaderboardOpenedFromPlay, setLeaderboardOpenedFromPlay] =
+    useState(false);
   const [showStats, setShowStats] = useState(false);
   const [statsOpenedFromSettings, setStatsOpenedFromSettings] = useState(false);
+  const [statsOpenedFromPlay, setStatsOpenedFromPlay] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalTab, setAuthModalTab] = useState("signup");
+  const [authOpenedFromSettings, setAuthOpenedFromSettings] = useState(false);
+  const [authOpenedFromLeaderboard, setAuthOpenedFromLeaderboard] =
+    useState(false);
+  const [authOpenedFromPlay, setAuthOpenedFromPlay] = useState(false);
+  const [activeProfile, setActiveProfile] = useState(() => getPlayerProfile());
   const [countdown, setCountdown] = useState(
     () => getTimeUntilNextPuzzle().formatted,
   );
+
+  const settingsBackdropMouseDownRef = useRef(false);
+  const tutorialBackdropMouseDownRef = useRef(false);
+
+  const isAnyModalOpen = Boolean(
+    showPlayMenu ||
+    showSettings ||
+    showTutorial ||
+    showLeaderboard ||
+    showStats ||
+    showAuthModal,
+  );
+
+  useEffect(() => {
+    const { unsubscribe } = onAuthStateChange(() => {
+      setActiveProfile(getPlayerProfile());
+    });
+    return () => unsubscribe();
+  }, []);
 
   const {
     solution,
@@ -208,44 +228,121 @@ export default function App() {
   } = state;
 
   const statusTimeoutRef = useRef(null);
-  const isPlaying = launchPhase === "PLAYING";
 
-  // Handlers for modal navigation with settings return support
-  const handleOpenLeaderboard = useCallback((fromSettings = false) => {
-    if (fromSettings) {
-      setShowSettings(false);
-      setLeaderboardOpenedFromSettings(true);
-    } else {
-      setLeaderboardOpenedFromSettings(false);
-    }
-    setShowLeaderboard(true);
-  }, []);
+  // Handlers for modal navigation with settings/play menu return support
+  const handleOpenLeaderboard = useCallback(
+    (fromSettings = false, fromPlay = false) => {
+      if (fromSettings) {
+        setShowSettings(false);
+        setLeaderboardOpenedFromSettings(true);
+        setLeaderboardOpenedFromPlay(false);
+      } else if (fromPlay) {
+        setShowPlayMenu(false);
+        setLeaderboardOpenedFromPlay(true);
+        setLeaderboardOpenedFromSettings(false);
+      } else {
+        setLeaderboardOpenedFromSettings(false);
+        setLeaderboardOpenedFromPlay(false);
+      }
+      setShowLeaderboard(true);
+    },
+    [],
+  );
 
   const handleCloseLeaderboard = useCallback(() => {
     setShowLeaderboard(false);
     if (leaderboardOpenedFromSettings) {
       setLeaderboardOpenedFromSettings(false);
       setShowSettings(true);
+    } else if (leaderboardOpenedFromPlay) {
+      setLeaderboardOpenedFromPlay(false);
+      setShowPlayMenu(true);
     }
-  }, [leaderboardOpenedFromSettings]);
+  }, [leaderboardOpenedFromSettings, leaderboardOpenedFromPlay]);
 
-  const handleOpenStats = useCallback((fromSettings = false) => {
-    if (fromSettings) {
-      setShowSettings(false);
-      setStatsOpenedFromSettings(true);
-    } else {
-      setStatsOpenedFromSettings(false);
-    }
-    setShowStats(true);
-  }, []);
+  const handleOpenStats = useCallback(
+    (fromSettings = false, fromPlay = false) => {
+      if (fromSettings) {
+        setShowSettings(false);
+        setStatsOpenedFromSettings(true);
+        setStatsOpenedFromPlay(false);
+      } else if (fromPlay) {
+        setShowPlayMenu(false);
+        setStatsOpenedFromPlay(true);
+        setStatsOpenedFromSettings(false);
+      } else {
+        setStatsOpenedFromSettings(false);
+        setStatsOpenedFromPlay(false);
+      }
+      setShowStats(true);
+    },
+    [],
+  );
 
   const handleCloseStats = useCallback(() => {
     setShowStats(false);
     if (statsOpenedFromSettings) {
       setStatsOpenedFromSettings(false);
       setShowSettings(true);
+    } else if (statsOpenedFromPlay) {
+      setStatsOpenedFromPlay(false);
+      setShowPlayMenu(true);
     }
-  }, [statsOpenedFromSettings]);
+  }, [statsOpenedFromSettings, statsOpenedFromPlay]);
+
+  const handleOpenAuth = useCallback(
+    (
+      tab = "signup",
+      fromSettings = false,
+      fromLeaderboard = false,
+      fromPlay = false,
+    ) => {
+      if (fromSettings) {
+        setShowSettings(false);
+        setAuthOpenedFromSettings(true);
+      } else {
+        setAuthOpenedFromSettings(false);
+      }
+
+      if (fromLeaderboard) {
+        setShowLeaderboard(false);
+        setAuthOpenedFromLeaderboard(true);
+      } else {
+        setAuthOpenedFromLeaderboard(false);
+      }
+
+      if (fromPlay) {
+        setShowPlayMenu(false);
+        setAuthOpenedFromPlay(true);
+      } else {
+        setAuthOpenedFromPlay(false);
+      }
+
+      setAuthModalTab(tab);
+      setShowAuthModal(true);
+    },
+    [],
+  );
+
+  const handleCloseAuth = useCallback(() => {
+    setShowAuthModal(false);
+    setActiveProfile(getPlayerProfile());
+    if (authOpenedFromSettings) {
+      setAuthOpenedFromSettings(false);
+      setShowSettings(true);
+    } else if (authOpenedFromLeaderboard) {
+      setAuthOpenedFromLeaderboard(false);
+      setShowLeaderboard(true);
+    } else if (authOpenedFromPlay) {
+      setAuthOpenedFromPlay(false);
+      setShowPlayMenu(true);
+    }
+  }, [authOpenedFromSettings, authOpenedFromLeaderboard, authOpenedFromPlay]);
+
+  const handleSignOut = useCallback(async () => {
+    await signOut();
+    setActiveProfile(getPlayerProfile());
+  }, []);
 
   // Countdown timer update
   useEffect(() => {
@@ -306,38 +403,31 @@ export default function App() {
       localStorage.setItem("geotrace_tutorial_seen", "true");
     } catch {}
 
-    if (tutorialOpenedFromSettings) {
-      setTutorialOpenedFromSettings(false);
+    if (tutorialSource === "settings") {
       setShowSettings(true);
-    } else if (launchPhase !== "PLAYING") {
-      setLaunchPhase("LAUNCHING");
+    } else if (tutorialSource === "play") {
+      setShowPlayMenu(true);
+    } else {
+      // Direct / first-time onboarding -> start playing immediately!
+      setShowPlayMenu(false);
+      setShowSettings(false);
     }
-  }, [tutorialOpenedFromSettings, launchPhase]);
+  }, [tutorialSource]);
 
-  const handleOpenTutorial = useCallback(() => {
-    setShowSettings(false);
-    setTutorialOpenedFromSettings(true);
+  const handleOpenTutorial = useCallback((source = "settings") => {
+    if (source === "settings") {
+      setShowSettings(false);
+    } else if (source === "play") {
+      setShowPlayMenu(false);
+    }
+    setTutorialSource(source);
     setTutorialPage(0);
     setShowTutorial(true);
   }, []);
 
-  useEffect(() => {
-    if (launchPhase !== "LAUNCHING") return undefined;
-    const launchTimeout = setTimeout(() => setLaunchPhase("PLAYING"), 1200);
-    return () => clearTimeout(launchTimeout);
-  }, [launchPhase]);
-
   // Stopwatch counts up while playing; automatically saved to prevent reset abuse
   useEffect(() => {
-    if (
-      !isPlaying ||
-      gameState !== "PLAYING" ||
-      showTutorial ||
-      showSettings ||
-      showLeaderboard ||
-      showStats
-    )
-      return undefined;
+    if (gameState !== "PLAYING" || isAnyModalOpen) return undefined;
 
     const intervalId = setInterval(() => {
       setState((prev) => {
@@ -355,16 +445,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [
-    gameState,
-    isPlaying,
-    showTutorial,
-    showSettings,
-    showLeaderboard,
-    showStats,
-    dateKey,
-    levelId,
-  ]);
+  }, [gameState, isAnyModalOpen, dateKey, levelId]);
 
   useEffect(() => () => clearTimeout(statusTimeoutRef.current), []);
 
@@ -412,31 +493,23 @@ export default function App() {
   // Backspace deletes the last traced beacon
   useEffect(() => {
     const handleKeyDown = (event) => {
+      const target = event.target;
+      const isInput =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (isInput) return;
+
       if (event.key !== "Backspace") return;
-      if (
-        !isPlaying ||
-        gameState !== "PLAYING" ||
-        showTutorial ||
-        showSettings ||
-        showLeaderboard ||
-        showStats
-      )
-        return;
+      if (gameState !== "PLAYING" || isAnyModalOpen) return;
       event.preventDefault();
       handleBackspace();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    isPlaying,
-    gameState,
-    showTutorial,
-    showSettings,
-    showLeaderboard,
-    showStats,
-    handleBackspace,
-  ]);
+  }, [gameState, isAnyModalOpen, handleBackspace]);
 
   const handleSubmit = useCallback(() => {
     setState((prev) => {
@@ -530,37 +603,32 @@ export default function App() {
   // Enter submits the current trace
   useEffect(() => {
     const handleKeyDown = (event) => {
+      const target = event.target;
+      const isInput =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (isInput) return;
+
       if (event.key !== "Enter") return;
-      if (
-        !isPlaying ||
-        gameState !== "PLAYING" ||
-        showTutorial ||
-        showSettings ||
-        showLeaderboard ||
-        showStats
-      )
-        return;
+      if (gameState !== "PLAYING" || isAnyModalOpen) return;
       event.preventDefault();
       handleSubmit();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    isPlaying,
-    gameState,
-    showTutorial,
-    showSettings,
-    showLeaderboard,
-    showStats,
-    handleSubmit,
-  ]);
+  }, [gameState, isAnyModalOpen, handleSubmit]);
 
   // Escape closes open modals
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Escape") return;
-      if (showTutorial) {
+      if (showAuthModal) {
+        event.preventDefault();
+        handleCloseAuth();
+      } else if (showTutorial) {
         event.preventDefault();
         handleCloseTutorial();
       } else if (showLeaderboard) {
@@ -578,10 +646,12 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
+    showAuthModal,
     showTutorial,
     showSettings,
     showLeaderboard,
     showStats,
+    handleCloseAuth,
     handleCloseTutorial,
     handleCloseLeaderboard,
     handleCloseStats,
@@ -665,37 +735,17 @@ export default function App() {
   return (
     <div className="app-shell">
       {/* Top Corner Action Controls (Always Visible) */}
-      {!showTutorial && (
-        <div className="top-corner-actions">
-          <button
-            type="button"
-            className="icon-action-button"
-            onClick={() => handleOpenLeaderboard(false)}
-            aria-label="Open leaderboard"
-            title="Daily Leaderboard"
-          >
-            <Trophy size={18} />
-          </button>
-          <button
-            type="button"
-            className="icon-action-button"
-            onClick={() => handleOpenStats(false)}
-            aria-label="Open stats"
-            title="Career Statistics"
-          >
-            <BarChart2 size={18} />
-          </button>
-          <button
-            type="button"
-            className="icon-action-button"
-            onClick={() => setShowSettings(true)}
-            aria-label="Open settings"
-            title="Settings"
-          >
-            <Settings size={18} />
-          </button>
-        </div>
-      )}
+      <div className="top-corner-actions">
+        <button
+          type="button"
+          className="icon-action-button"
+          onClick={() => setShowSettings(true)}
+          aria-label="Open settings"
+          title="Settings"
+        >
+          <Settings size={18} />
+        </button>
+      </div>
 
       <div
         className="map-area"
@@ -705,14 +755,7 @@ export default function App() {
           currentTrace={currentTrace}
           onSelectLetter={handleSelectLetter}
           onNavigate={() => setShowExploreHint(false)}
-          disabled={
-            !isPlaying ||
-            gameState !== "PLAYING" ||
-            showSettings ||
-            showTutorial ||
-            showLeaderboard ||
-            showStats
-          }
+          disabled={gameState !== "PLAYING" || isAnyModalOpen}
           level={activeLevel}
           beacons={levelBeacons}
         />
@@ -720,7 +763,7 @@ export default function App() {
           <Timer size={20} />
           <span>{formatStopwatch(elapsedSeconds)}</span>
         </div>
-        {isPlaying && showExploreHint && (
+        {gameState === "PLAYING" && showExploreHint && (
           <div className="explore-hint" role="status">
             <MapPin size={16} aria-hidden="true" />
             Pan and zoom to locate beacons
@@ -797,8 +840,8 @@ export default function App() {
                 className="btn btn-secondary"
                 onClick={handleBackspace}
                 disabled={
-                  !isPlaying ||
                   gameState !== "PLAYING" ||
+                  isAnyModalOpen ||
                   currentTrace.length === 0
                 }
               >
@@ -810,14 +853,15 @@ export default function App() {
                 className="btn btn-primary"
                 onClick={handleSubmit}
                 disabled={
-                  !isPlaying ||
                   gameState !== "PLAYING" ||
+                  isAnyModalOpen ||
                   currentTrace.length !== WORD_LENGTH
                 }
               >
                 <Send size={16} />
                 Submit Guess
               </button>
+              <span className="solution">{solution}</span>
             </div>
           </section>
         </div>
@@ -911,7 +955,22 @@ export default function App() {
       </div>
 
       {showTutorial && (
-        <div className="tutorial-backdrop" role="presentation">
+        <div
+          className="tutorial-backdrop"
+          role="presentation"
+          onMouseDown={(e) => {
+            tutorialBackdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
+          onClick={(e) => {
+            if (
+              tutorialBackdropMouseDownRef.current &&
+              e.target === e.currentTarget
+            ) {
+              handleCloseTutorial();
+            }
+            tutorialBackdropMouseDownRef.current = false;
+          }}
+        >
           <section
             className="tutorial-modal"
             role="dialog"
@@ -920,9 +979,11 @@ export default function App() {
           >
             <div className="tutorial-heading">
               <div className="tutorial-heading-left">
-                <MapPin size={24} aria-hidden="true" />
+                <div className="tutorial-header-icon">
+                  <BookOpen size={22} />
+                </div>
                 <div>
-                  <p className="tutorial-kicker">GeoTrace briefing</p>
+                  <p className="tutorial-kicker">Operator Briefing</p>
                   <h2 id="tutorial-title">
                     {tutorialPage === 0 ? "How to Play" : "Score the Signal"}
                   </h2>
@@ -930,12 +991,12 @@ export default function App() {
               </div>
               <button
                 type="button"
-                className="tutorial-close"
+                className="tutorial-close modal-close-btn"
                 onClick={handleCloseTutorial}
                 aria-label="Close tutorial"
                 title="Close"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
             </div>
             {tutorialPage === 0 ? (
@@ -1119,15 +1180,20 @@ export default function App() {
                 className="btn btn-primary tutorial-start"
                 onClick={handleCloseTutorial}
               >
-                {tutorialOpenedFromSettings ? (
+                {tutorialSource === "settings" ? (
                   <>
                     <ChevronLeft size={16} />
-                    Back to Settings
+                    <span>Back to Settings</span>
+                  </>
+                ) : tutorialSource === "play" ? (
+                  <>
+                    <ChevronLeft size={16} />
+                    <span>Back to Mission</span>
                   </>
                 ) : (
                   <>
-                    <Zap size={16} />
-                    Start Daily Game
+                    <span>Engage Daily Signal</span>
+                    <ArrowRight size={16} />
                   </>
                 )}
               </button>
@@ -1136,22 +1202,21 @@ export default function App() {
         </div>
       )}
 
-      {launchPhase === "LAUNCHING" && (
-        <div className="launch-overlay" role="status" aria-live="polite">
-          <div className="launch-signal">
-            <Radio size={28} aria-hidden="true" />
-            <p className="launch-kicker">GeoTrace #{puzzleNumber}</p>
-            <strong>Acquiring Daily Signal</strong>
-          </div>
-        </div>
-      )}
-
       {showSettings && (
         <div
           className="settings-backdrop"
           role="presentation"
+          onMouseDown={(e) => {
+            settingsBackdropMouseDownRef.current = e.target === e.currentTarget;
+          }}
           onClick={(e) => {
-            if (e.target === e.currentTarget) setShowSettings(false);
+            if (
+              settingsBackdropMouseDownRef.current &&
+              e.target === e.currentTarget
+            ) {
+              setShowSettings(false);
+            }
+            settingsBackdropMouseDownRef.current = false;
           }}
         >
           <section
@@ -1161,16 +1226,96 @@ export default function App() {
             aria-labelledby="settings-title"
           >
             <div className="settings-heading">
-              <h2 id="settings-title">Settings</h2>
+              <div className="settings-heading-left">
+                <div className="settings-header-icon">
+                  <Settings size={22} />
+                </div>
+                <div>
+                  <p className="settings-kicker">System Configuration</p>
+                  <h2 id="settings-title">Settings</h2>
+                </div>
+              </div>
               <button
                 type="button"
-                className="settings-close"
+                className="settings-close modal-close-btn"
                 onClick={() => setShowSettings(false)}
                 aria-label="Close settings"
                 title="Close"
               >
-                <X size={16} />
+                <X size={18} />
               </button>
+            </div>
+
+            <div className="settings-section">
+              <p className="settings-label">Operator Account</p>
+              {activeProfile.isRegistered ? (
+                <div className="account-status-card">
+                  <div className="settings-card-left">
+                    <div
+                      className="settings-card-icon"
+                      style={{ color: "#4ade80" }}
+                    >
+                      <ShieldCheck size={18} />
+                    </div>
+                    <div className="settings-card-info">
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span className="settings-card-name">
+                          {activeProfile.callsign}
+                        </span>
+                        <span className="verified-badge">Verified</span>
+                      </div>
+                      <span className="settings-card-subtitle">
+                        {activeProfile.email || "Account Active"}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="account-signout-btn"
+                    onClick={handleSignOut}
+                    title="Sign Out"
+                  >
+                    <LogOut size={13} />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="settings-card"
+                  onClick={() => handleOpenAuth("signup", true, false, false)}
+                >
+                  <div className="settings-card-left">
+                    <div className="settings-card-icon">
+                      <User size={18} />
+                    </div>
+                    <div className="settings-card-info">
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        <span className="settings-card-name">
+                          {activeProfile.callsign}
+                        </span>
+                        <span className="guest-badge">Guest</span>
+                      </div>
+                      <span className="settings-card-subtitle">
+                        Sign in to claim & reserve your unique callsign
+                      </span>
+                    </div>
+                  </div>
+                  <span className="settings-card-badge">Sign In</span>
+                </button>
+              )}
             </div>
 
             <div className="settings-section">
@@ -1178,7 +1323,7 @@ export default function App() {
               <button
                 type="button"
                 className="settings-card"
-                onClick={handleOpenTutorial}
+                onClick={() => handleOpenTutorial("settings")}
               >
                 <div className="settings-card-left">
                   <div className="settings-card-icon">
@@ -1200,7 +1345,7 @@ export default function App() {
               <button
                 type="button"
                 className="settings-card"
-                onClick={() => handleOpenLeaderboard(true)}
+                onClick={() => handleOpenLeaderboard(true, false)}
               >
                 <div className="settings-card-left">
                   <div className="settings-card-icon">
@@ -1221,7 +1366,7 @@ export default function App() {
                 type="button"
                 className="settings-card"
                 style={{ marginTop: 8 }}
-                onClick={() => handleOpenStats(true)}
+                onClick={() => handleOpenStats(true, false)}
               >
                 <div className="settings-card-left">
                   <div className="settings-card-icon">
@@ -1285,6 +1430,26 @@ export default function App() {
         </div>
       )}
 
+      {/* Daily Mission Briefing / Play Modal */}
+      <PlayModal
+        isOpen={showPlayMenu}
+        onPlay={() => setShowPlayMenu(false)}
+        puzzleNumber={puzzleNumber}
+        dateKey={dateKey}
+        levelId={levelId}
+        activeLevel={activeLevel}
+        onSelectLevel={handleSelectLevel}
+        profile={activeProfile}
+        gameState={gameState}
+        guessesCount={guesses.length}
+        score={score}
+        countdown={countdown}
+        onOpenTutorial={() => handleOpenTutorial("play")}
+        onOpenLeaderboard={() => handleOpenLeaderboard(false, true)}
+        onOpenStats={() => handleOpenStats(false, true)}
+        onOpenAuth={(tab) => handleOpenAuth(tab, false, false, true)}
+      />
+
       {/* Leaderboard Modal */}
       <LeaderboardModal
         isOpen={showLeaderboard}
@@ -1294,6 +1459,7 @@ export default function App() {
         levelId={levelId}
         levelName={activeLevel.name}
         isOpenedFromSettings={leaderboardOpenedFromSettings}
+        onOpenAuth={(tab) => handleOpenAuth(tab, false, true, false)}
       />
 
       {/* Stats Modal */}
@@ -1301,6 +1467,14 @@ export default function App() {
         isOpen={showStats}
         onClose={handleCloseStats}
         isOpenedFromSettings={statsOpenedFromSettings}
+      />
+
+      {/* Operator Authentication Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={handleCloseAuth}
+        initialTab={authModalTab}
+        onAuthSuccess={(p) => setActiveProfile(p)}
       />
 
       <Analytics />

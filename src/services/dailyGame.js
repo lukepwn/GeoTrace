@@ -1,6 +1,8 @@
 // Daily Game Service for GeoTrace
-// Handles deterministic daily puzzle selection, state persistence, lockout, and player stats.
+// Handles deterministic daily puzzle selection, state persistence, lockout, player stats, and guest/auth profile management.
 import { TARGET_WORDS } from "../gameLogic";
+import { supabase } from "./supabase";
+import { getAuthProfile, updateAccountCallsign } from "./authService";
 
 const DAILY_STATE_PREFIX = "geotrace_daily_";
 const STATS_KEY = "geotrace_stats";
@@ -53,7 +55,10 @@ export function getDailyPuzzleNumber(dateKey = getTodayDateKey()) {
  * @param {string} [levelId]
  * @returns {{ puzzleNumber: number, dateKey: string, levelId: string, solution: string }}
  */
-export function getDailyPuzzleInfo(dateKey = getTodayDateKey(), levelId = "levelone") {
+export function getDailyPuzzleInfo(
+  dateKey = getTodayDateKey(),
+  levelId = "levelone",
+) {
   const puzzleNumber = getDailyPuzzleNumber(dateKey);
   const levelHash = (levelId || "levelone")
     .split("")
@@ -77,9 +82,14 @@ export function getDailyPuzzleInfo(dateKey = getTodayDateKey(), levelId = "level
  * @param {string} [levelId]
  * @returns {object|null}
  */
-export function getSavedDailyState(dateKey = getTodayDateKey(), levelId = "levelone") {
+export function getSavedDailyState(
+  dateKey = getTodayDateKey(),
+  levelId = "levelone",
+) {
   try {
-    const raw = localStorage.getItem(`${DAILY_STATE_PREFIX}${dateKey}_${levelId}`);
+    const raw = localStorage.getItem(
+      `${DAILY_STATE_PREFIX}${dateKey}_${levelId}`,
+    );
     if (raw) return JSON.parse(raw);
     // Legacy fallback without levelId for levelone
     if (levelId === "levelone") {
@@ -129,20 +139,34 @@ function generateUUID() {
 }
 
 /**
- * Get or create the local player profile
- * @returns {{ id: string, callsign: string, createdAt: string }}
+ * Get active player profile (authenticated profile if logged in, otherwise local guest profile)
+ * @returns {{ id: string, callsign: string, isRegistered: boolean, email?: string }}
  */
 export function getPlayerProfile() {
+  // Check if authenticated
+  const authProfile = getAuthProfile();
+  if (authProfile && authProfile.id) {
+    return {
+      id: authProfile.id,
+      callsign: authProfile.callsign,
+      isRegistered: true,
+      email: authProfile.email,
+    };
+  }
+
+  // Otherwise, guest profile (local only)
   try {
     const raw = localStorage.getItem(PROFILE_KEY);
     if (raw) {
-      return JSON.parse(raw);
+      const guest = JSON.parse(raw);
+      return { ...guest, isRegistered: false };
     }
   } catch {}
 
   const defaultProfile = {
     id: generateUUID(),
     callsign: `Agent-${Math.floor(100 + Math.random() * 900)}`,
+    isRegistered: false,
     createdAt: new Date().toISOString(),
   };
 
@@ -156,16 +180,28 @@ export function getPlayerProfile() {
 /**
  * Update player callsign
  * @param {string} callsign
- * @returns {{ id: string, callsign: string, createdAt: string }}
+ * @returns {Promise<{ success: boolean, profile: object, error?: string }>}
  */
-export function updatePlayerCallsign(callsign) {
+export async function updatePlayerCallsign(callsign) {
+  const authProfile = getAuthProfile();
+
+  if (authProfile && authProfile.id) {
+    const res = await updateAccountCallsign(callsign);
+    if (res.success) {
+      return { success: true, profile: getPlayerProfile() };
+    }
+    return res;
+  }
+
+  // Guest callsign update (local only)
   const clean = callsign.trim().slice(0, 16) || "Agent-001";
-  const profile = getPlayerProfile();
-  profile.callsign = clean;
+  const guest = getPlayerProfile();
+  guest.callsign = clean;
   try {
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    localStorage.setItem(PROFILE_KEY, JSON.stringify(guest));
   } catch {}
-  return profile;
+
+  return { success: true, profile: guest };
 }
 
 /**

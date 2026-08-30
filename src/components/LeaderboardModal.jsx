@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
   Trophy,
   Medal,
@@ -11,6 +11,11 @@ import {
   Users,
   Flame,
   Clock,
+  Radio,
+  ShieldCheck,
+  Sparkles,
+  AlertCircle,
+  Loader2,
 } from "lucide-react";
 import {
   fetchDailyLeaderboard,
@@ -30,12 +35,14 @@ export default function LeaderboardModal({
   levelId = "levelone",
   levelName = "Archipelago",
   isOpenedFromSettings = false,
+  onOpenAuth,
 }) {
   const [leaderboardData, setLeaderboardData] = useState({
     leaderboard: [],
     userRank: null,
     userEntry: null,
     totalPlayers: 0,
+    isLive: false,
   });
   const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(
@@ -43,7 +50,10 @@ export default function LeaderboardModal({
   );
   const [isEditingCallsign, setIsEditingCallsign] = useState(false);
   const [callsignInput, setCallsignInput] = useState("");
+  const [editError, setEditError] = useState("");
+  const [savingCallsign, setSavingCallsign] = useState(false);
   const [profile, setProfile] = useState(() => getPlayerProfile());
+  const backdropMouseDownRef = useRef(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -63,6 +73,8 @@ export default function LeaderboardModal({
       const currentProfile = getPlayerProfile();
       setProfile(currentProfile);
       setCallsignInput(currentProfile.callsign);
+      setEditError("");
+      setIsEditingCallsign(false);
     }
   }, [isOpen, loadData]);
 
@@ -75,26 +87,52 @@ export default function LeaderboardModal({
     return () => clearInterval(interval);
   }, [isOpen]);
 
-  const handleSaveCallsign = (e) => {
+  const handleSaveCallsign = async (e) => {
     e.preventDefault();
     if (!callsignInput.trim()) return;
-    const updated = updatePlayerCallsign(callsignInput);
-    setProfile(updated);
-    setIsEditingCallsign(false);
-    loadData();
+    setEditError("");
+    setSavingCallsign(true);
+
+    try {
+      const res = await updatePlayerCallsign(callsignInput);
+      if (res.success) {
+        setProfile(res.profile);
+        setIsEditingCallsign(false);
+        loadData();
+      } else {
+        setEditError(res.error || "Could not update callsign.");
+      }
+    } catch (err) {
+      setEditError(err.message || "An error occurred.");
+    } finally {
+      setSavingCallsign(false);
+    }
   };
 
   if (!isOpen) return null;
 
-  const { leaderboard, userRank, userEntry, totalPlayers } = leaderboardData;
+  const {
+    leaderboard = [],
+    userRank = null,
+    userEntry = null,
+    totalPlayers = 0,
+    isLive = false,
+  } = leaderboardData || {};
   const isUserInTop10 = userRank && userRank <= 10;
+  const isVerified = Boolean(profile?.isRegistered);
 
   return (
     <div
       className="leaderboard-backdrop"
       role="presentation"
+      onMouseDown={(e) => {
+        backdropMouseDownRef.current = e.target === e.currentTarget;
+      }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (backdropMouseDownRef.current && e.target === e.currentTarget) {
+          onClose();
+        }
+        backdropMouseDownRef.current = false;
       }}
     >
       <section
@@ -110,7 +148,24 @@ export default function LeaderboardModal({
               <Trophy size={24} />
             </div>
             <div>
-              <p className="leaderboard-kicker">Global Transmission Log</p>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {isLive && (
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      backgroundColor: "#22c55e",
+                      boxShadow: "0 0 8px #22c55e",
+                    }}
+                    title="Connected to Live Database"
+                  />
+                )}
+                <p className="leaderboard-kicker">
+                  {isLive ? "Live Transmission Log" : "Global Transmission Log"}
+                </p>
+              </div>
               <h2 id="leaderboard-title">Daily Leaderboard</h2>
             </div>
           </div>
@@ -161,39 +216,93 @@ export default function LeaderboardModal({
                   type="text"
                   maxLength={16}
                   value={callsignInput}
-                  onChange={(e) => setCallsignInput(e.target.value)}
+                  onChange={(e) => {
+                    setCallsignInput(e.target.value);
+                    setEditError("");
+                  }}
                   className="callsign-input"
                   autoFocus
                   placeholder="Enter callsign"
+                  disabled={savingCallsign}
                 />
                 <button
                   type="submit"
                   className="callsign-btn-save"
                   title="Save Callsign"
+                  disabled={savingCallsign}
                 >
-                  <Check size={14} />
+                  {savingCallsign ? (
+                    <Loader2 size={13} className="spin" />
+                  ) : (
+                    <Check size={14} />
+                  )}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsEditingCallsign(false)}
+                  onClick={() => {
+                    setIsEditingCallsign(false);
+                    setEditError("");
+                  }}
                   className="callsign-btn-cancel"
                   title="Cancel"
+                  disabled={savingCallsign}
                 >
                   <X size={14} />
                 </button>
               </form>
             ) : (
               <div className="callsign-display">
-                <strong>{profile.callsign}</strong>
-                <button
-                  type="button"
-                  className="callsign-edit-trigger"
-                  onClick={() => setIsEditingCallsign(true)}
-                  title="Change your callsign"
-                >
-                  <Edit2 size={13} />
-                  <span>Edit</span>
-                </button>
+                <strong className="callsign-text">{profile.callsign}</strong>
+                {isVerified ? (
+                  <span
+                    className="verified-badge"
+                    title="Verified Operator Account"
+                  >
+                    <ShieldCheck size={13} />
+                    <span>Verified</span>
+                  </span>
+                ) : (
+                  <span
+                    className="guest-badge"
+                    title="Temporary Guest Callsign"
+                  >
+                    Guest
+                  </span>
+                )}
+
+                {isVerified ? (
+                  <button
+                    type="button"
+                    className="callsign-edit-trigger"
+                    onClick={() => {
+                      setCallsignInput(profile.callsign);
+                      setIsEditingCallsign(true);
+                      setEditError("");
+                    }}
+                    title="Change your verified callsign"
+                  >
+                    <Edit2 size={13} />
+                    <span>Edit</span>
+                  </button>
+                ) : (
+                  onOpenAuth && (
+                    <button
+                      type="button"
+                      className="callsign-claim-trigger"
+                      onClick={() => onOpenAuth("signup")}
+                      title="Reserve your unique callsign with an account"
+                    >
+                      <Sparkles size={13} />
+                      <span>Claim Callsign</span>
+                    </button>
+                  )
+                )}
+              </div>
+            )}
+            {editError && (
+              <div className="callsign-error-msg">
+                <AlertCircle size={12} />
+                <span>{editError}</span>
               </div>
             )}
           </div>

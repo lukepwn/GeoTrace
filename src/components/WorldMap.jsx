@@ -57,6 +57,8 @@ export default function WorldMap({
   }, []);
 
   useEffect(() => {
+    if (disabled) return undefined;
+
     const pressedKeys = new Set();
     let animationFrameId = null;
     let lastTimestamp = null;
@@ -92,8 +94,16 @@ export default function WorldMap({
     };
 
     const handleKeyDown = (event) => {
+      const target = event.target;
+      const isInput =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      if (isInput) return;
+
       const key = event.key.toLowerCase();
-      if (!PAN_KEYS[key] || disabled) return;
+      if (!PAN_KEYS[key]) return;
       event.preventDefault();
       if (pressedKeys.size === 0) {
         lastTimestamp = null;
