@@ -33,6 +33,7 @@ export default function WorldMap({
   onSelectLetter,
   onNavigate,
   disabled = false,
+  readOnly = false,
   level = LEVEL_ONE,
   beacons = null,
 }) {
@@ -157,7 +158,7 @@ export default function WorldMap({
     (event) => {
       const start = pointerDownRef.current;
       pointerDownRef.current = null;
-      if (disabled || !start) return;
+      if (disabled || readOnly || !start) return;
 
       const threshold =
         start.pointerType === "touch" ? 14 : CLICK_DRAG_THRESHOLD;
@@ -230,7 +231,7 @@ export default function WorldMap({
       addFlag("hit", bonus);
       onSelectLetter(closestBeacon, { precision, bonus, isReposition });
     },
-    [disabled, currentTrace, onSelectLetter, activeBeacons],
+    [disabled, readOnly, currentTrace, onSelectLetter, activeBeacons],
   );
 
   return (

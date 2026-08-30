@@ -32,6 +32,7 @@ import {
   LogOut,
   X,
   Zap,
+  Sparkles,
 } from "lucide-react";
 import WorldMap from "./components/WorldMap.jsx";
 import LeaderboardModal from "./components/LeaderboardModal.jsx";
@@ -87,6 +88,63 @@ function formatStopwatch(totalSeconds) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * Evaluates performance across precision, speed, and guess efficiency
+ * to provide a single, high-impact tactical coaching tip.
+ */
+function getSmartDebriefTip({
+  score,
+  guesses,
+  elapsedSeconds,
+  creditedBonusByChar,
+  gameState,
+}) {
+  if (gameState === "LOST") {
+    return {
+      category: "Deduction Path",
+      tip: "Prioritize high-frequency vowels (E, A, O, I) on early traces to lock in letters faster.",
+    };
+  }
+
+  // Check precision bonus across locked letters (each letter bonus is 30 to 50 pts, where +20 is center bullseye)
+  const bonusEntries = Object.values(creditedBonusByChar || {});
+  const avgBonus =
+    bonusEntries.length > 0
+      ? bonusEntries.reduce((sum, b) => sum + (b.bonus || 30), 0) /
+        bonusEntries.length
+      : 30;
+
+  // 1. If elapsed time >= 60s, player missed the 1.5x and 2.0x speed multipliers
+  if (elapsedSeconds >= 60) {
+    return {
+      category: "Signal Tempo",
+      tip: `Elapsed time was ${formatStopwatch(elapsedSeconds)} (1.0x multiplier). Submit traces faster to unlock 1.5x and 2.0x score multipliers.`,
+    };
+  }
+
+  // 2. If precision was low (avg bonus < 40 out of 50, meaning < +10 precision above base 30)
+  if (avgBonus < 40) {
+    return {
+      category: "Targeting Precision",
+      tip: `Beacon accuracy averaged ${Math.round(avgBonus)}/50 pts. Zoom in closer to beacon centers before tapping to lock in +20 bullseye bonuses.`,
+    };
+  }
+
+  // 3. If deductions took 5 or 6 guesses
+  if (guesses.length >= 5) {
+    return {
+      category: "Deduction Margin",
+      tip: `Solved in ${guesses.length}/6 traces. Test high-frequency consonants (T, N, S, R) earlier to narrow down coordinates in fewer guesses.`,
+    };
+  }
+
+  // 4. If all areas were strong (fast speed, high precision, low guesses)
+  return {
+    category: "Elite Reconnaissance",
+    tip: "Outstanding performance! Pinpoint beacon precision, rapid signal speed, and elite deductive path.",
+  };
 }
 
 function fireVictoryConfetti() {
@@ -202,6 +260,9 @@ export default function App() {
   const [showMobileHistory, setShowMobileHistory] = useState(false);
   const mobileHistoryTimeoutRef = useRef(null);
 
+  const [showEndModal, setShowEndModal] = useState(true);
+  const endModalBackdropMouseDownRef = useRef(false);
+
   const settingsBackdropMouseDownRef = useRef(false);
   const tutorialBackdropMouseDownRef = useRef(false);
 
@@ -211,7 +272,8 @@ export default function App() {
     showTutorial ||
     showLeaderboard ||
     showStats ||
-    showAuthModal,
+    showAuthModal ||
+    (state.gameState !== "PLAYING" && showEndModal),
   );
 
   useEffect(() => {
@@ -231,6 +293,17 @@ export default function App() {
     statusMessage,
     shakeId,
   } = state;
+
+  const smartDebriefTip = useMemo(() => {
+    if (gameState === "PLAYING") return null;
+    return getSmartDebriefTip({
+      score,
+      guesses,
+      elapsedSeconds,
+      creditedBonusByChar: state.creditedBonusByChar,
+      gameState,
+    });
+  }, [gameState, score, guesses, elapsedSeconds, state.creditedBonusByChar]);
 
   const statusTimeoutRef = useRef(null);
 
@@ -398,6 +471,7 @@ export default function App() {
           shakeId: 0,
         });
       }
+      setShowEndModal(true);
     },
     [dateKey, state, levelId],
   );
@@ -655,12 +729,17 @@ export default function App() {
       } else if (showSettings) {
         event.preventDefault();
         setShowSettings(false);
+      } else if (gameState !== "PLAYING" && showEndModal) {
+        event.preventDefault();
+        setShowEndModal(false);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
+    showEndModal,
+    gameState,
     showAuthModal,
     showTutorial,
     showSettings,
@@ -782,7 +861,8 @@ export default function App() {
               setShowMobileHistory(false);
             }
           }}
-          disabled={gameState !== "PLAYING" || isAnyModalOpen}
+          disabled={isAnyModalOpen}
+          readOnly={gameState !== "PLAYING"}
           level={activeLevel}
           beacons={levelBeacons}
         />
@@ -955,18 +1035,66 @@ export default function App() {
           </section>
         </div>
 
-        {gameState !== "PLAYING" && (
-          <div className="end-overlay">
+        {gameState !== "PLAYING" && !showEndModal && (
+          <button
+            type="button"
+            className="end-summary-pill"
+            onClick={() => setShowEndModal(true)}
+            aria-label="Reopen victory summary and debrief"
+          >
+            <span className="live-pulse-dot" />
+            <span className="end-pill-title">
+              {gameState === "WON" ? "Signal Locked" : "Transmission Lost"}{" "}
+              &bull; {score} pts ({getScoreTier(score).tier})
+            </span>
+            <span className="end-pill-divider" />
+            <span className="end-pill-cta">View Summary &bull; Share</span>
+          </button>
+        )}
+
+        {gameState !== "PLAYING" && showEndModal && (
+          <div
+            className="end-overlay"
+            role="presentation"
+            onMouseDown={(e) => {
+              endModalBackdropMouseDownRef.current =
+                e.target === e.currentTarget;
+            }}
+            onClick={(e) => {
+              if (
+                endModalBackdropMouseDownRef.current &&
+                e.target === e.currentTarget
+              ) {
+                setShowEndModal(false);
+              }
+              endModalBackdropMouseDownRef.current = false;
+            }}
+          >
             <section
               className={`end-panel end-panel--${gameState.toLowerCase()}`}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="end-panel-title"
             >
-              <div className="end-panel-badge-top">
-                Geotrace #{puzzleNumber} &bull; Daily Challenge
+              <div className="end-panel-header-row">
+                <div className="end-panel-badge-top">
+                  GeoTrace #{puzzleNumber} &bull; Daily Challenge
+                </div>
+                <button
+                  type="button"
+                  className="modal-close-btn end-close-btn"
+                  onClick={() => setShowEndModal(false)}
+                  aria-label="Close summary"
+                  title="Close"
+                >
+                  <X size={18} />
+                </button>
               </div>
-              <h2>
+
+              <h2 id="end-panel-title">
                 {gameState === "WON" ? "Signal Locked!" : "Transmission Lost"}
               </h2>
-              <p>
+              <p className="end-panel-solution">
                 The word was <strong>{solution}</strong>.
               </p>
               {gameState === "WON" && (
@@ -1002,6 +1130,20 @@ export default function App() {
                   </strong>
                 </div>
               </div>
+
+              {smartDebriefTip && (
+                <div className="smart-debrief-box">
+                  <div className="smart-debrief-icon">
+                    <Sparkles size={16} />
+                  </div>
+                  <div className="smart-debrief-content">
+                    <p className="smart-debrief-kicker">
+                      Tactical Debrief &bull; {smartDebriefTip.category}
+                    </p>
+                    <p className="smart-debrief-text">{smartDebriefTip.tip}</p>
+                  </div>
+                </div>
+              )}
 
               <div className="end-panel-countdown">
                 <span className="countdown-sub">NEXT SIGNAL IN</span>
