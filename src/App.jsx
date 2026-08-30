@@ -1030,7 +1030,7 @@ export default function App() {
                 <Send size={16} />
                 Submit Guess
               </button>
-              <span className="solution">{solution}</span>
+              {/* <span className="solution">{solution}</span> */}
             </div>
           </section>
         </div>
@@ -1080,15 +1080,26 @@ export default function App() {
                 <div className="end-panel-badge-top">
                   GeoTrace #{puzzleNumber} &bull; Daily Challenge
                 </div>
-                <button
-                  type="button"
-                  className="modal-close-btn end-close-btn"
-                  onClick={() => setShowEndModal(false)}
-                  aria-label="Close summary"
-                  title="Close"
-                >
-                  <X size={18} />
-                </button>
+                <div className="end-panel-header-actions">
+                  <button
+                    type="button"
+                    className="modal-icon-btn end-settings-btn"
+                    onClick={() => setShowSettings(true)}
+                    aria-label="Open settings"
+                    title="Settings"
+                  >
+                    <Settings size={17} />
+                  </button>
+                  <button
+                    type="button"
+                    className="modal-close-btn end-close-btn"
+                    onClick={() => setShowEndModal(false)}
+                    aria-label="Close summary"
+                    title="Close"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
 
               <h2 id="end-panel-title">
