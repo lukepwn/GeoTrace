@@ -1,4 +1,4 @@
-// Daily Game Service for GeoTrace
+// Daily Game Service for Geotrace
 // Handles deterministic daily puzzle selection, state persistence, lockout, player stats, and guest/auth profile management.
 import { TARGET_WORDS } from "../gameLogic";
 import { supabase } from "./supabase";

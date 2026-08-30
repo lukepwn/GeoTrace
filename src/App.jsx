@@ -698,7 +698,7 @@ export default function App() {
       gameState === "WON"
         ? `${guesses.length}/${MAX_GUESSES}`
         : `X/${MAX_GUESSES}`;
-    const shareTitle = `GeoTrace #${puzzleNumber} (${activeLevel.name}) ${guessResult}`;
+    const shareTitle = `Geotrace #${puzzleNumber} (${activeLevel.name}) ${guessResult}`;
     const shareLink = "https://geotrace.bytemapstudio.com";
     const shareText = `${shareTitle}\n${score} pts (${scoreTier.tier} Tier ${scoreTier.label.toUpperCase()})\n\n${emojiRows}\n\n${shareLink}`;
 
@@ -811,7 +811,7 @@ export default function App() {
             <div className="hud-title-wrap">
               <div className="hud-title">
                 <MapPin size={20} className="hud-icon" />
-                <h1>GeoTrace</h1>
+                <h1>Geotrace</h1>
               </div>
               <span className="hud-puzzle-pill">#{puzzleNumber}</span>
             </div>
@@ -961,7 +961,7 @@ export default function App() {
               className={`end-panel end-panel--${gameState.toLowerCase()}`}
             >
               <div className="end-panel-badge-top">
-                GeoTrace #{puzzleNumber} &bull; Daily Challenge
+                Geotrace #{puzzleNumber} &bull; Daily Challenge
               </div>
               <h2>
                 {gameState === "WON" ? "Signal Locked!" : "Transmission Lost"}

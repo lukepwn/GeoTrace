@@ -1,5 +1,5 @@
 -- ==============================================================================
--- GeoTrace Supabase Schema, Authentication & Unique Callsigns Setup
+-- Geotrace Supabase Schema, Authentication & Unique Callsigns Setup
 -- Run this script in your Supabase Dashboard -> SQL Editor
 -- (Idempotent & safe to re-run multiple times)
 -- ==============================================================================

@@ -186,7 +186,7 @@ export default function LeaderboardModal({
         <div className="leaderboard-subbar">
           <div className="subbar-item">
             <span className="subbar-label">Daily Signal</span>
-            <strong className="subbar-value">GeoTrace #{puzzleNumber}</strong>
+            <strong className="subbar-value">Geotrace #{puzzleNumber}</strong>
           </div>
           <div className="subbar-divider" />
           <div className="subbar-item">

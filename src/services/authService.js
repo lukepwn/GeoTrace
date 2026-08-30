@@ -1,4 +1,4 @@
-// Authentication & Account Service for GeoTrace
+// Authentication & Account Service for Geotrace
 // Manages Supabase Auth, verified profiles, unique callsign validation, and guest migration.
 import { supabase } from "./supabase";
 

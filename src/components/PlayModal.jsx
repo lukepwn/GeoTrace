@@ -60,7 +60,7 @@ export default function PlayModal({
                 <p className="play-kicker">Daily Mission Briefing</p>
                 <span className="play-date-pill">{dateKey}</span>
               </div>
-              <h2 id="play-modal-title">GeoTrace #{puzzleNumber}</h2>
+              <h2 id="play-modal-title">Geotrace #{puzzleNumber}</h2>
             </div>
           </div>
         </div>

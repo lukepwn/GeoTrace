@@ -1,4 +1,4 @@
-// Leaderboard Service for GeoTrace
+// Leaderboard Service for Geotrace
 // Provides daily score tracking, player ranking, Supabase cloud persistence, and fallback community simulation.
 import { getPlayerProfile, getTodayDateKey } from "./dailyGame";
 import { supabase } from "./supabase";
