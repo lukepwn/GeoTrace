@@ -9,33 +9,44 @@ import { Analytics } from "@vercel/analytics/react";
 import confetti from "canvas-confetti";
 import {
   ArrowRight,
+  BarChart2,
   BookOpen,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Compass,
   Delete,
   Flame,
-  Layers,
   MapPin,
   Radio,
   Send,
-  RotateCcw,
   Settings,
   Share2,
   Star,
   Timer,
+  Trophy,
   X,
   Zap,
 } from "lucide-react";
 import WorldMap from "./components/WorldMap.jsx";
+import LeaderboardModal from "./components/LeaderboardModal.jsx";
+import StatsModal from "./components/StatsModal.jsx";
 import {
   ALLOWED_GUESSES,
   MAX_GUESSES,
   WORD_LENGTH,
   evaluateGuess,
-  pickRandomSolution,
   generateBeacons,
 } from "./gameLogic";
+import {
+  getDailyPuzzleInfo,
+  getSavedDailyState,
+  saveDailyState,
+  recordGameResult,
+  getTimeUntilNextPuzzle,
+  getTodayDateKey,
+} from "./services/dailyGame";
+import { submitDailyScore } from "./services/leaderboardService";
 import { LEVELS, DEFAULT_LEVEL_ID, getLevelById } from "./config/levels";
 import "./App.css";
 
@@ -47,11 +58,7 @@ function speedMultiplier(elapsedSeconds) {
   return 1;
 }
 
-// Score tiers are calibrated against realistic play data rather than the raw
-// theoretical max: most players (casual 2-4min, stuck 5min+) finish well past
-// the speed-multiplier window and rely on precision alone, since beacons must
-// be found on the map first. Only fast/skilled players (10-60s, ~4 guesses)
-// bank the 1.5x/2x multiplier on more than one or two letters.
+// Score tiers are calibrated against realistic play data rather than the raw theoretical max
 const SCORE_TIERS = [
   { tier: "S", min: 300, label: "Legendary" },
   { tier: "A", min: 220, label: "Excellent" },
@@ -65,20 +72,6 @@ function getScoreTier(score) {
     SCORE_TIERS.find((t) => score >= t.min) ??
     SCORE_TIERS[SCORE_TIERS.length - 1]
   );
-}
-
-function createInitialState() {
-  return {
-    solution: pickRandomSolution(),
-    guesses: [],
-    creditedBonusByChar: {},
-    currentTrace: [],
-    score: 0,
-    elapsedSeconds: 0,
-    gameState: "PLAYING",
-    statusMessage: "Trace beacons on the map to spell your guess.",
-    shakeId: 0,
-  };
 }
 
 function formatStopwatch(totalSeconds) {
@@ -99,6 +92,13 @@ function fireVictoryConfetti() {
 const LEVEL_STORAGE_KEY = "geotrace-selected-level";
 
 export default function App() {
+  const todayDateKey = useMemo(() => getTodayDateKey(), []);
+  const dailyInfo = useMemo(
+    () => getDailyPuzzleInfo(todayDateKey),
+    [todayDateKey],
+  );
+  const { puzzleNumber, dateKey, solution: dailySolution } = dailyInfo;
+
   const [levelId, setLevelId] = useState(() => {
     try {
       return localStorage.getItem(LEVEL_STORAGE_KEY) || DEFAULT_LEVEL_ID;
@@ -113,15 +113,89 @@ export default function App() {
     [activeLevel],
   );
 
-  const [state, setState] = useState(createInitialState);
-  const [launchPhase, setLaunchPhase] = useState("INITIAL");
-  const [showTutorial, setShowTutorial] = useState(true);
+  // Initialize state from saved daily progress or start fresh daily puzzle for this level
+  const [state, setState] = useState(() => {
+    const initialLevel = (() => {
+      try {
+        return localStorage.getItem(LEVEL_STORAGE_KEY) || DEFAULT_LEVEL_ID;
+      } catch {
+        return DEFAULT_LEVEL_ID;
+      }
+    })();
+    const levelInfo = getDailyPuzzleInfo(dateKey, initialLevel);
+    const saved = getSavedDailyState(dateKey, initialLevel);
+    if (saved) {
+      return {
+        solution: saved.solution || levelInfo.solution,
+        guesses: saved.guesses || [],
+        creditedBonusByChar: saved.creditedBonusByChar || {},
+        currentTrace: saved.currentTrace || [],
+        score: saved.score || 0,
+        elapsedSeconds: saved.elapsedSeconds || 0,
+        gameState: saved.gameState || "PLAYING",
+        statusMessage:
+          saved.statusMessage ||
+          "Trace beacons on the map to spell your guess.",
+        shakeId: 0,
+      };
+    }
+    return {
+      solution: levelInfo.solution,
+      guesses: [],
+      creditedBonusByChar: {},
+      currentTrace: [],
+      score: 0,
+      elapsedSeconds: 0,
+      gameState: "PLAYING",
+      statusMessage: "Trace beacons on the map to spell your guess.",
+      shakeId: 0,
+    };
+  });
+
+  const [showTutorial, setShowTutorial] = useState(() => {
+    try {
+      const tutorialSeen = localStorage.getItem("geotrace_tutorial_seen");
+      const saved = getSavedDailyState(dateKey);
+      if (saved && (saved.gameState === "WON" || saved.gameState === "LOST")) {
+        return false;
+      }
+      return !tutorialSeen;
+    } catch {
+      return true;
+    }
+  });
+
+  const [launchPhase, setLaunchPhase] = useState(() => {
+    try {
+      const tutorialSeen = localStorage.getItem("geotrace_tutorial_seen");
+      const saved = getSavedDailyState(dateKey);
+      if (saved && (saved.gameState === "WON" || saved.gameState === "LOST")) {
+        return "PLAYING";
+      }
+      if (tutorialSeen) {
+        return "PLAYING";
+      }
+      return "INITIAL";
+    } catch {
+      return "INITIAL";
+    }
+  });
+
   const [tutorialOpenedFromSettings, setTutorialOpenedFromSettings] =
     useState(false);
   const [showExploreHint, setShowExploreHint] = useState(true);
   const [tutorialPage, setTutorialPage] = useState(0);
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [leaderboardOpenedFromSettings, setLeaderboardOpenedFromSettings] =
+    useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [statsOpenedFromSettings, setStatsOpenedFromSettings] = useState(false);
+  const [countdown, setCountdown] = useState(
+    () => getTimeUntilNextPuzzle().formatted,
+  );
+
   const {
     solution,
     guesses,
@@ -132,19 +206,106 @@ export default function App() {
     statusMessage,
     shakeId,
   } = state;
+
   const statusTimeoutRef = useRef(null);
   const isPlaying = launchPhase === "PLAYING";
 
-  const handleSelectLevel = useCallback((id) => {
-    setLevelId(id);
-    try {
-      localStorage.setItem(LEVEL_STORAGE_KEY, id);
-    } catch {}
-    setState(createInitialState());
+  // Handlers for modal navigation with settings return support
+  const handleOpenLeaderboard = useCallback((fromSettings = false) => {
+    if (fromSettings) {
+      setShowSettings(false);
+      setLeaderboardOpenedFromSettings(true);
+    } else {
+      setLeaderboardOpenedFromSettings(false);
+    }
+    setShowLeaderboard(true);
   }, []);
+
+  const handleCloseLeaderboard = useCallback(() => {
+    setShowLeaderboard(false);
+    if (leaderboardOpenedFromSettings) {
+      setLeaderboardOpenedFromSettings(false);
+      setShowSettings(true);
+    }
+  }, [leaderboardOpenedFromSettings]);
+
+  const handleOpenStats = useCallback((fromSettings = false) => {
+    if (fromSettings) {
+      setShowSettings(false);
+      setStatsOpenedFromSettings(true);
+    } else {
+      setStatsOpenedFromSettings(false);
+    }
+    setShowStats(true);
+  }, []);
+
+  const handleCloseStats = useCallback(() => {
+    setShowStats(false);
+    if (statsOpenedFromSettings) {
+      setStatsOpenedFromSettings(false);
+      setShowSettings(true);
+    }
+  }, [statsOpenedFromSettings]);
+
+  // Countdown timer update
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setCountdown(getTimeUntilNextPuzzle().formatted);
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  const handleSelectLevel = useCallback(
+    (id) => {
+      // 1. Save current level's state before switching
+      saveDailyState(dateKey, state, levelId);
+
+      // 2. Set new level
+      setLevelId(id);
+      try {
+        localStorage.setItem(LEVEL_STORAGE_KEY, id);
+      } catch {}
+
+      // 3. Load or create state for the selected level
+      const saved = getSavedDailyState(dateKey, id);
+      if (saved) {
+        setState({
+          solution: saved.solution || getDailyPuzzleInfo(dateKey, id).solution,
+          guesses: saved.guesses || [],
+          creditedBonusByChar: saved.creditedBonusByChar || {},
+          currentTrace: saved.currentTrace || [],
+          score: saved.score || 0,
+          elapsedSeconds: saved.elapsedSeconds || 0,
+          gameState: saved.gameState || "PLAYING",
+          statusMessage:
+            saved.statusMessage ||
+            "Trace beacons on the map to spell your guess.",
+          shakeId: 0,
+        });
+      } else {
+        const levelInfo = getDailyPuzzleInfo(dateKey, id);
+        setState({
+          solution: levelInfo.solution,
+          guesses: [],
+          creditedBonusByChar: {},
+          currentTrace: [],
+          score: 0,
+          elapsedSeconds: 0,
+          gameState: "PLAYING",
+          statusMessage: "Trace beacons on the map to spell your guess.",
+          shakeId: 0,
+        });
+      }
+    },
+    [dateKey, state, levelId],
+  );
 
   const handleCloseTutorial = useCallback(() => {
     setShowTutorial(false);
+    try {
+      localStorage.setItem("geotrace_tutorial_seen", "true");
+    } catch {}
+
     if (tutorialOpenedFromSettings) {
       setTutorialOpenedFromSettings(false);
       setShowSettings(true);
@@ -162,25 +323,48 @@ export default function App() {
 
   useEffect(() => {
     if (launchPhase !== "LAUNCHING") return undefined;
-
     const launchTimeout = setTimeout(() => setLaunchPhase("PLAYING"), 1200);
     return () => clearTimeout(launchTimeout);
   }, [launchPhase]);
 
-  // Stopwatch counts up while playing; it only drives the speed bonus, it never ends the round.
+  // Stopwatch counts up while playing; automatically saved to prevent reset abuse
   useEffect(() => {
-    if (!isPlaying || gameState !== "PLAYING" || showTutorial || showSettings)
+    if (
+      !isPlaying ||
+      gameState !== "PLAYING" ||
+      showTutorial ||
+      showSettings ||
+      showLeaderboard ||
+      showStats
+    )
       return undefined;
 
     const intervalId = setInterval(() => {
       setState((prev) => {
         if (prev.gameState !== "PLAYING") return prev;
-        return { ...prev, elapsedSeconds: prev.elapsedSeconds + 1 };
+        const nextTime = prev.elapsedSeconds + 1;
+        if (nextTime % 5 === 0) {
+          saveDailyState(
+            dateKey,
+            { ...prev, elapsedSeconds: nextTime },
+            levelId,
+          );
+        }
+        return { ...prev, elapsedSeconds: nextTime };
       });
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [gameState, isPlaying, showTutorial, showSettings]);
+  }, [
+    gameState,
+    isPlaying,
+    showTutorial,
+    showSettings,
+    showLeaderboard,
+    showStats,
+    dateKey,
+    levelId,
+  ]);
 
   useEffect(() => () => clearTimeout(statusTimeoutRef.current), []);
 
@@ -198,7 +382,6 @@ export default function App() {
         (t) => t.beacon.id === beacon.id,
       );
 
-      // Re-selecting the same beacon repositions its flag instead of adding a duplicate.
       if (existingIndex !== -1) {
         const nextTrace = [...prev.currentTrace];
         nextTrace[existingIndex] = entry;
@@ -226,11 +409,18 @@ export default function App() {
     });
   }, []);
 
-  // Backspace deletes the last traced beacon, mirroring the toolbar button.
+  // Backspace deletes the last traced beacon
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Backspace") return;
-      if (!isPlaying || gameState !== "PLAYING" || showTutorial || showSettings)
+      if (
+        !isPlaying ||
+        gameState !== "PLAYING" ||
+        showTutorial ||
+        showSettings ||
+        showLeaderboard ||
+        showStats
+      )
         return;
       event.preventDefault();
       handleBackspace();
@@ -238,7 +428,15 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, gameState, showTutorial, showSettings, handleBackspace]);
+  }, [
+    isPlaying,
+    gameState,
+    showTutorial,
+    showSettings,
+    showLeaderboard,
+    showStats,
+    handleBackspace,
+  ]);
 
   const handleSubmit = useCallback(() => {
     setState((prev) => {
@@ -260,9 +458,7 @@ export default function App() {
 
       const statuses = evaluateGuess(guessWord, prev.solution);
       const currentSpeedMultiplier = speedMultiplier(prev.elapsedSeconds);
-      // Re-guessing an already-correct letter can adjust its precision bonus,
-      // but the speed multiplier locks in at the moment the letter was first
-      // guessed correctly so later, slower guesses can't erode it.
+
       const nextCreditedBonusByChar = { ...prev.creditedBonusByChar };
       const roundBonus = prev.currentTrace.reduce((sum, trace, index) => {
         if (statuses[index] !== "correct") return sum;
@@ -279,6 +475,7 @@ export default function App() {
         };
         return sum + (nextBanked - previousBanked);
       }, 0);
+
       const nextScore = Math.max(0, prev.score + roundBonus);
       const evaluatedRow = { word: guessWord, statuses };
       const nextGuesses = [...prev.guesses, evaluatedRow];
@@ -286,48 +483,62 @@ export default function App() {
       const isLastGuess = nextGuesses.length >= MAX_GUESSES;
       const bonusVerb = roundBonus < 0 ? "" : "+";
 
+      let nextGameState = "PLAYING";
+      let nextStatusMessage = `${bonusVerb}${roundBonus} bonus banked. Keep tracing.`;
+
       if (isWin) {
-        return {
-          ...prev,
-          guesses: nextGuesses,
-          creditedBonusByChar: nextCreditedBonusByChar,
-          currentTrace: [],
-          score: nextScore,
-          gameState: "WON",
-          statusMessage: `Signal locked! ${bonusVerb}${roundBonus} bonus. The word was ${prev.solution}.`,
-        };
+        nextGameState = "WON";
+        nextStatusMessage = `Signal locked! ${bonusVerb}${roundBonus} bonus. The word was ${prev.solution}.`;
+      } else if (isLastGuess) {
+        nextGameState = "LOST";
+        nextStatusMessage = `Out of guesses. The word was ${prev.solution}.`;
       }
 
-      if (isLastGuess) {
-        return {
-          ...prev,
-          guesses: nextGuesses,
-          creditedBonusByChar: nextCreditedBonusByChar,
-          currentTrace: [],
-          score: nextScore,
-          gameState: "LOST",
-          statusMessage: `Out of guesses. The word was ${prev.solution}.`,
-          shakeId: prev.shakeId + 1,
-        };
-      }
-
-      return {
+      const nextState = {
         ...prev,
         guesses: nextGuesses,
         creditedBonusByChar: nextCreditedBonusByChar,
         currentTrace: [],
-        shakeId: prev.shakeId + 1,
         score: nextScore,
-        statusMessage: `${bonusVerb}${roundBonus} bonus banked. Keep tracing.`,
+        gameState: nextGameState,
+        statusMessage: nextStatusMessage,
+        shakeId: isWin ? prev.shakeId : prev.shakeId + 1,
       };
-    });
-  }, []);
 
-  // Enter submits the current trace, mirroring the toolbar button.
+      // Persist state
+      saveDailyState(dateKey, nextState, levelId);
+
+      // If game concludes, update streaks and submit to leaderboard
+      if (isWin || isLastGuess) {
+        recordGameResult(dateKey, isWin, nextGuesses.length, nextScore);
+        submitDailyScore({
+          dateKey,
+          levelId,
+          puzzleNumber,
+          score: nextScore,
+          guessesCount: nextGuesses.length,
+          timeSeconds: prev.elapsedSeconds,
+          tier: getScoreTier(nextScore).tier,
+          gameState: nextGameState,
+        });
+      }
+
+      return nextState;
+    });
+  }, [dateKey, puzzleNumber, levelId]);
+
+  // Enter submits the current trace
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Enter") return;
-      if (!isPlaying || gameState !== "PLAYING" || showTutorial || showSettings)
+      if (
+        !isPlaying ||
+        gameState !== "PLAYING" ||
+        showTutorial ||
+        showSettings ||
+        showLeaderboard ||
+        showStats
+      )
         return;
       event.preventDefault();
       handleSubmit();
@@ -335,15 +546,29 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, gameState, showTutorial, showSettings, handleSubmit]);
+  }, [
+    isPlaying,
+    gameState,
+    showTutorial,
+    showSettings,
+    showLeaderboard,
+    showStats,
+    handleSubmit,
+  ]);
 
-  // Escape closes open modals (tutorial or settings)
+  // Escape closes open modals
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Escape") return;
       if (showTutorial) {
         event.preventDefault();
         handleCloseTutorial();
+      } else if (showLeaderboard) {
+        event.preventDefault();
+        handleCloseLeaderboard();
+      } else if (showStats) {
+        event.preventDefault();
+        handleCloseStats();
       } else if (showSettings) {
         event.preventDefault();
         setShowSettings(false);
@@ -352,18 +577,23 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showTutorial, showSettings, handleCloseTutorial]);
+  }, [
+    showTutorial,
+    showSettings,
+    showLeaderboard,
+    showStats,
+    handleCloseTutorial,
+    handleCloseLeaderboard,
+    handleCloseStats,
+  ]);
 
   useEffect(() => {
     if (gameState === "WON") fireVictoryConfetti();
   }, [gameState]);
 
-  const handleReset = useCallback(() => {
-    setState(createInitialState());
-  }, []);
-
   const [shareCopied, setShareCopied] = useState(false);
 
+  // Directly copy formatted text to clipboard without external share sheets
   const handleShare = useCallback(() => {
     const emojiRows = guesses
       .map((g) =>
@@ -379,13 +609,41 @@ export default function App() {
       )
       .join("\n");
     const scoreTier = getScoreTier(score);
+    const guessResult =
+      gameState === "WON"
+        ? `${guesses.length}/${MAX_GUESSES}`
+        : `X/${MAX_GUESSES}`;
+    const shareTitle = `GeoTrace #${puzzleNumber} (${activeLevel.name}) ${guessResult}`;
     const shareLink = "https://geotrace.bytemapstudio.com";
-    const shareText = `Geotrace ${guesses.length}/${MAX_GUESSES}\n${score} pts (${scoreTier.tier} Tier ${scoreTier.label.toUpperCase()})\n\n${emojiRows}\n\n${shareLink}`;
-    navigator.clipboard?.writeText(shareText).then(() => {
-      setShareCopied(true);
-      setTimeout(() => setShareCopied(false), 2000);
-    });
-  }, [guesses, score]);
+    const shareText = `${shareTitle}\n${score} pts (${scoreTier.tier} Tier ${scoreTier.label.toUpperCase()})\n\n${emojiRows}\n\n${shareLink}`;
+
+    const copyText = (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        return navigator.clipboard.writeText(text);
+      }
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      return new Promise((resolve, reject) => {
+        document.execCommand("copy") ? resolve() : reject();
+        textArea.remove();
+      });
+    };
+
+    copyText(shareText)
+      .then(() => {
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2500);
+      })
+      .catch((err) => {
+        console.error("Failed to copy:", err);
+      });
+  }, [guesses, score, gameState, puzzleNumber]);
 
   const multiplier = `${speedMultiplier(elapsedSeconds).toFixed(1)}x`;
 
@@ -406,16 +664,37 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {/* Top Corner Action Controls (Always Visible) */}
       {!showTutorial && (
-        <button
-          type="button"
-          className="settings-button"
-          onClick={() => setShowSettings(true)}
-          aria-label="Open settings"
-          title="Settings"
-        >
-          <Settings size={18} />
-        </button>
+        <div className="top-corner-actions">
+          <button
+            type="button"
+            className="icon-action-button"
+            onClick={() => handleOpenLeaderboard(false)}
+            aria-label="Open leaderboard"
+            title="Daily Leaderboard"
+          >
+            <Trophy size={18} />
+          </button>
+          <button
+            type="button"
+            className="icon-action-button"
+            onClick={() => handleOpenStats(false)}
+            aria-label="Open stats"
+            title="Career Statistics"
+          >
+            <BarChart2 size={18} />
+          </button>
+          <button
+            type="button"
+            className="icon-action-button"
+            onClick={() => setShowSettings(true)}
+            aria-label="Open settings"
+            title="Settings"
+          >
+            <Settings size={18} />
+          </button>
+        </div>
       )}
 
       <div
@@ -430,7 +709,9 @@ export default function App() {
             !isPlaying ||
             gameState !== "PLAYING" ||
             showSettings ||
-            showTutorial
+            showTutorial ||
+            showLeaderboard ||
+            showStats
           }
           level={activeLevel}
           beacons={levelBeacons}
@@ -448,9 +729,12 @@ export default function App() {
 
         <div className="right-dock">
           <header className="hud-float">
-            <div className="hud-title">
-              <MapPin size={20} className="hud-icon" />
-              <h1>Geotrace</h1>
+            <div className="hud-title-wrap">
+              <div className="hud-title">
+                <MapPin size={20} className="hud-icon" />
+                <h1>GeoTrace</h1>
+              </div>
+              <span className="hud-puzzle-pill">#{puzzleNumber}</span>
             </div>
             <div className="hud-badges">
               <div className="badge badge-score" title="Precision bonus score">
@@ -534,7 +818,6 @@ export default function App() {
                 <Send size={16} />
                 Submit Guess
               </button>
-              <div>solution: {solution}</div>
             </div>
           </section>
         </div>
@@ -544,6 +827,9 @@ export default function App() {
             <section
               className={`end-panel end-panel--${gameState.toLowerCase()}`}
             >
+              <div className="end-panel-badge-top">
+                GeoTrace #{puzzleNumber} &bull; Daily Challenge
+              </div>
               <h2>
                 {gameState === "WON" ? "Signal Locked!" : "Transmission Lost"}
               </h2>
@@ -562,31 +848,62 @@ export default function App() {
                   </span>
                 </div>
               )}
-              {gameState === "WON" && (
-                <p className="end-panel-score">
-                  <Star size={16} />
-                  <strong>{score}</strong> points
-                </p>
-              )}
+
+              <div className="end-panel-stats-summary">
+                <div className="end-stat-box">
+                  <span className="end-stat-label">Score</span>
+                  <strong className="end-stat-value">
+                    <Star size={14} /> {score}
+                  </strong>
+                </div>
+                <div className="end-stat-box">
+                  <span className="end-stat-label">Guesses</span>
+                  <strong className="end-stat-value">
+                    {gameState === "WON" ? guesses.length : "X"}/{MAX_GUESSES}
+                  </strong>
+                </div>
+                <div className="end-stat-box">
+                  <span className="end-stat-label">Time</span>
+                  <strong className="end-stat-value">
+                    {formatStopwatch(elapsedSeconds)}
+                  </strong>
+                </div>
+              </div>
+
+              <div className="end-panel-countdown">
+                <span className="countdown-sub">NEXT SIGNAL IN</span>
+                <strong className="countdown-time">
+                  <Clock size={16} /> {countdown}
+                </strong>
+              </div>
+
               <div className="end-panel-actions">
-                {gameState === "WON" && (
+                <button
+                  type="button"
+                  className="btn btn-primary end-btn-share"
+                  onClick={handleShare}
+                >
+                  <Share2 size={16} />
+                  {shareCopied ? "Copied to Clipboard!" : "Share Result"}
+                </button>
+                <div className="end-panel-actions-sub">
                   <button
                     type="button"
                     className="btn btn-secondary"
-                    onClick={handleShare}
+                    onClick={() => handleOpenLeaderboard(false)}
                   >
-                    <Share2 size={16} />
-                    {shareCopied ? "Copied!" : "Share"}
+                    <Trophy size={16} />
+                    Leaderboard
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={handleReset}
-                >
-                  <RotateCcw size={16} />
-                  Play Again
-                </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => handleOpenStats(false)}
+                  >
+                    <BarChart2 size={16} />
+                    Career Stats
+                  </button>
+                </div>
               </div>
             </section>
           </div>
@@ -624,8 +941,8 @@ export default function App() {
             {tutorialPage === 0 ? (
               <>
                 <p className="tutorial-lede">
-                  Trace five beacons on the map to decode the hidden word in six
-                  guesses.
+                  Trace five beacons on the map to decode today's daily signal
+                  in six guesses. One challenge per day!
                 </p>
 
                 <div
@@ -810,7 +1127,7 @@ export default function App() {
                 ) : (
                   <>
                     <Zap size={16} />
-                    Start Game
+                    Start Daily Game
                   </>
                 )}
               </button>
@@ -823,14 +1140,20 @@ export default function App() {
         <div className="launch-overlay" role="status" aria-live="polite">
           <div className="launch-signal">
             <Radio size={28} aria-hidden="true" />
-            <p className="launch-kicker">GeoTrace uplink</p>
-            <strong>Starting game</strong>
+            <p className="launch-kicker">GeoTrace #{puzzleNumber}</p>
+            <strong>Acquiring Daily Signal</strong>
           </div>
         </div>
       )}
 
       {showSettings && (
-        <div className="settings-backdrop" role="presentation">
+        <div
+          className="settings-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowSettings(false);
+          }}
+        >
           <section
             className="settings-modal"
             role="dialog"
@@ -873,7 +1196,52 @@ export default function App() {
             </div>
 
             <div className="settings-section">
-              <p className="settings-label">Select Level</p>
+              <p className="settings-label">Records & Standings</p>
+              <button
+                type="button"
+                className="settings-card"
+                onClick={() => handleOpenLeaderboard(true)}
+              >
+                <div className="settings-card-left">
+                  <div className="settings-card-icon">
+                    <Trophy size={18} />
+                  </div>
+                  <div className="settings-card-info">
+                    <span className="settings-card-name">
+                      Daily Leaderboard
+                    </span>
+                    <span className="settings-card-subtitle">
+                      View today's top global scores
+                    </span>
+                  </div>
+                </div>
+                <span className="settings-card-badge">Open</span>
+              </button>
+              <button
+                type="button"
+                className="settings-card"
+                style={{ marginTop: 8 }}
+                onClick={() => handleOpenStats(true)}
+              >
+                <div className="settings-card-left">
+                  <div className="settings-card-icon">
+                    <BarChart2 size={18} />
+                  </div>
+                  <div className="settings-card-info">
+                    <span className="settings-card-name">
+                      Career Statistics
+                    </span>
+                    <span className="settings-card-subtitle">
+                      Streaks, win rates & guess distribution
+                    </span>
+                  </div>
+                </div>
+                <span className="settings-card-badge">Open</span>
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <p className="settings-label">Map Theme</p>
               <div className="level-select-grid">
                 {LEVELS.map((lvl) => {
                   const isActive = lvl.id === levelId;
@@ -916,6 +1284,25 @@ export default function App() {
           </section>
         </div>
       )}
+
+      {/* Leaderboard Modal */}
+      <LeaderboardModal
+        isOpen={showLeaderboard}
+        onClose={handleCloseLeaderboard}
+        dateKey={dateKey}
+        puzzleNumber={puzzleNumber}
+        levelId={levelId}
+        levelName={activeLevel.name}
+        isOpenedFromSettings={leaderboardOpenedFromSettings}
+      />
+
+      {/* Stats Modal */}
+      <StatsModal
+        isOpen={showStats}
+        onClose={handleCloseStats}
+        isOpenedFromSettings={statsOpenedFromSettings}
+      />
+
       <Analytics />
     </div>
   );
