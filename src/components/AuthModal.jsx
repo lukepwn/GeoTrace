@@ -143,7 +143,16 @@ export default function AuthModal({
     const val = e.target.value;
     setEmail(val);
     setErrorMsg("");
-    if (val.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim())) {
+    if (emailError) {
+      if (!val.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim())) {
+        setEmailError("");
+      }
+    }
+  };
+
+  const handleEmailBlur = (e) => {
+    const val = e.target.value.trim();
+    if (val && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
       setEmailError("Please enter a valid email format.");
     } else {
       setEmailError("");
@@ -177,7 +186,7 @@ export default function AuthModal({
         password: signinPassword,
       });
       if (res.success) {
-        setSuccessMsg(`Welcome back, Operator ${res.profile.callsign}!`);
+        setSuccessMsg(`Welcome back, ${res.profile.callsign}!`);
         setTimeout(() => {
           if (onAuthSuccess) onAuthSuccess(res.profile);
           onClose();
@@ -203,7 +212,7 @@ export default function AuthModal({
       setCallsignStatus({
         checking: false,
         available: false,
-        message: "Please choose a unique operator callsign.",
+        message: "Please choose a callsign.",
       });
       return;
     }
@@ -251,9 +260,7 @@ export default function AuthModal({
         callsign: callsign.trim(),
       });
       if (res.success) {
-        setSuccessMsg(
-          `Callsign ${res.profile.callsign} reserved! Account active.`,
-        );
+        setSuccessMsg(`Account created! Welcome, ${res.profile.callsign}.`);
         setTimeout(() => {
           if (onAuthSuccess) onAuthSuccess(res.profile);
           onClose();
@@ -297,11 +304,9 @@ export default function AuthModal({
               <ShieldCheck size={24} />
             </div>
             <div>
-              <p className="auth-kicker">Operator Credentials</p>
+              <p className="auth-kicker">Player Account</p>
               <h2 id="auth-title">
-                {tab === "signup"
-                  ? "Claim Unique Callsign"
-                  : "Operator Sign In"}
+                {tab === "signup" ? "Create Account" : "Sign In"}
               </h2>
             </div>
           </div>
@@ -363,7 +368,7 @@ export default function AuthModal({
           <form onSubmit={handleSignUpSubmit} className="auth-form" noValidate>
             <div className="auth-field">
               <label htmlFor="auth-callsign" className="auth-label">
-                Desired Callsign (Unique)
+                Callsign
               </label>
               <div className="auth-input-wrap">
                 <User size={16} className="auth-input-icon" />
@@ -373,7 +378,7 @@ export default function AuthModal({
                   maxLength={16}
                   value={callsign}
                   onChange={handleCallsignChange}
-                  placeholder="e.g. ShadowPin, Zenith-9"
+                  placeholder="Choose a callsign (e.g. ShadowPin)"
                   className={`auth-input${
                     callsignStatus.available === true
                       ? " auth-input--valid"
@@ -416,7 +421,7 @@ export default function AuthModal({
                   type="password"
                   value={password}
                   onChange={handlePasswordChange}
-                  placeholder="At least 6 characters"
+                  placeholder="Create a password (min. 6 characters)"
                   className={`auth-input${
                     passwordStatus.valid === true
                       ? " auth-input--valid"
@@ -456,7 +461,8 @@ export default function AuthModal({
                   type="email"
                   value={email}
                   onChange={handleEmailChange}
-                  placeholder="operator@domain.com (optional)"
+                  onBlur={handleEmailBlur}
+                  placeholder="yourname@example.com (optional)"
                   className={`auth-input${emailError ? " auth-input--invalid" : ""}`}
                 />
               </div>
@@ -464,7 +470,7 @@ export default function AuthModal({
                 <span className="auth-hint auth-hint--error">{emailError}</span>
               ) : (
                 <span className="auth-hint">
-                  Optional — used for account recovery & game updates.
+                  Optional — used for account recovery & updates.
                 </span>
               )}
             </div>
@@ -472,15 +478,11 @@ export default function AuthModal({
             <div className="auth-benefit-list">
               <div className="benefit-item">
                 <Check size={14} />
-                <span>
-                  Permanently claims and protects your unique callsign
-                </span>
+                <span>Save your custom callsign and gameplay stats</span>
               </div>
               <div className="benefit-item">
                 <Check size={14} />
-                <span>
-                  Syncs stats & daily leaderboard ranks across all devices
-                </span>
+                <span>Sync leaderboard ranks across all your devices</span>
               </div>
             </div>
 
@@ -492,12 +494,12 @@ export default function AuthModal({
               {loading ? (
                 <>
                   <Loader2 size={16} className="spin" />
-                  <span>Reserving Callsign...</span>
+                  <span>Creating account...</span>
                 </>
               ) : (
                 <>
-                  <ShieldCheck size={16} />
-                  <span>Register & Claim Callsign</span>
+                  <UserCheck size={16} />
+                  <span>Create Account</span>
                 </>
               )}
             </button>
@@ -507,7 +509,7 @@ export default function AuthModal({
           <form onSubmit={handleSignInSubmit} className="auth-form" noValidate>
             <div className="auth-field">
               <label htmlFor="auth-signin-identifier" className="auth-label">
-                Operator Callsign or Email
+                Callsign or Email
               </label>
               <div className="auth-input-wrap">
                 <User size={16} className="auth-input-icon" />
@@ -519,7 +521,7 @@ export default function AuthModal({
                     setSigninIdentifier(e.target.value);
                     setSigninError("");
                   }}
-                  placeholder="e.g. ShadowPin or operator@domain.com"
+                  placeholder="Enter your callsign or email"
                   className={`auth-input${signinError ? " auth-input--invalid" : ""}`}
                 />
               </div>
@@ -539,7 +541,7 @@ export default function AuthModal({
                     setSigninPassword(e.target.value);
                     setSigninError("");
                   }}
-                  placeholder="Your password"
+                  placeholder="Enter your password"
                   className={`auth-input${signinError ? " auth-input--invalid" : ""}`}
                 />
               </div>
@@ -558,12 +560,12 @@ export default function AuthModal({
               {loading ? (
                 <>
                   <Loader2 size={16} className="spin" />
-                  <span>Verifying Credentials...</span>
+                  <span>Signing in...</span>
                 </>
               ) : (
                 <>
                   <UserCheck size={16} />
-                  <span>Sign In Operator</span>
+                  <span>Sign In</span>
                 </>
               )}
             </button>

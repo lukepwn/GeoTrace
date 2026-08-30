@@ -1309,7 +1309,7 @@ export default function App() {
                         <span className="guest-badge">Guest</span>
                       </div>
                       <span className="settings-card-subtitle">
-                        Sign in to claim & reserve your unique callsign
+                        Sign in or create an account to save your stats
                       </span>
                     </div>
                   </div>

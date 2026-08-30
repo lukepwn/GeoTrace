@@ -290,10 +290,10 @@ export default function LeaderboardModal({
                       type="button"
                       className="callsign-claim-trigger"
                       onClick={() => onOpenAuth("signup")}
-                      title="Reserve your unique callsign with an account"
+                      title="Create an account to save your callsign & stats"
                     >
                       <Sparkles size={13} />
-                      <span>Claim Callsign</span>
+                      <span>Save Callsign</span>
                     </button>
                   )
                 )}

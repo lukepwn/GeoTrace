@@ -92,7 +92,7 @@ export default function PlayModal({
                     type="button"
                     className="play-operator-guest-btn"
                     onClick={() => onOpenAuth && onOpenAuth("signup")}
-                    title="Claim your callsign"
+                    title="Create an account or sign in"
                   >
                     <User size={13} />
                     <span>{profile?.callsign || "Guest"} (Guest)</span>
