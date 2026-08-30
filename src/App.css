@@ -751,8 +751,37 @@
 .tutorial-heading {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   color: var(--cyan);
+}
+
+.tutorial-heading-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tutorial-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel-alt);
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.tutorial-close:hover {
+  border-color: var(--cyan);
+  color: var(--text-primary);
 }
 
 .tutorial-kicker,
@@ -1356,4 +1385,89 @@
   border-color: var(--level-card-accent, var(--cyan));
   color: var(--level-card-accent, var(--cyan));
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------- Settings Action Card ---------- */
+
+.settings-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-panel-alt);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.settings-card:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 14px var(--cyan-glow);
+  background: #152238;
+}
+
+.settings-card-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-subtle);
+  color: var(--cyan);
+}
+
+.settings-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-card-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.settings-card-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.settings-card-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--cyan);
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.settings-card:hover .settings-card-badge {
+  border-color: var(--cyan);
+  background: rgba(56, 189, 248, 0.12);
 }

@@ -9,6 +9,7 @@ import { Analytics } from "@vercel/analytics/react";
 import confetti from "canvas-confetti";
 import {
   ArrowRight,
+  BookOpen,
   ChevronLeft,
   ChevronRight,
   Compass,
@@ -113,7 +114,10 @@ export default function App() {
   );
 
   const [state, setState] = useState(createInitialState);
-  const [launchPhase, setLaunchPhase] = useState("TUTORIAL");
+  const [launchPhase, setLaunchPhase] = useState("INITIAL");
+  const [showTutorial, setShowTutorial] = useState(true);
+  const [tutorialOpenedFromSettings, setTutorialOpenedFromSettings] =
+    useState(false);
   const [showExploreHint, setShowExploreHint] = useState(true);
   const [tutorialPage, setTutorialPage] = useState(0);
 
@@ -139,6 +143,23 @@ export default function App() {
     setState(createInitialState());
   }, []);
 
+  const handleCloseTutorial = useCallback(() => {
+    setShowTutorial(false);
+    if (tutorialOpenedFromSettings) {
+      setTutorialOpenedFromSettings(false);
+      setShowSettings(true);
+    } else if (launchPhase !== "PLAYING") {
+      setLaunchPhase("LAUNCHING");
+    }
+  }, [tutorialOpenedFromSettings, launchPhase]);
+
+  const handleOpenTutorial = useCallback(() => {
+    setShowSettings(false);
+    setTutorialOpenedFromSettings(true);
+    setTutorialPage(0);
+    setShowTutorial(true);
+  }, []);
+
   useEffect(() => {
     if (launchPhase !== "LAUNCHING") return undefined;
 
@@ -148,7 +169,8 @@ export default function App() {
 
   // Stopwatch counts up while playing; it only drives the speed bonus, it never ends the round.
   useEffect(() => {
-    if (!isPlaying || gameState !== "PLAYING") return undefined;
+    if (!isPlaying || gameState !== "PLAYING" || showTutorial || showSettings)
+      return undefined;
 
     const intervalId = setInterval(() => {
       setState((prev) => {
@@ -158,7 +180,7 @@ export default function App() {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [gameState, isPlaying]);
+  }, [gameState, isPlaying, showTutorial, showSettings]);
 
   useEffect(() => () => clearTimeout(statusTimeoutRef.current), []);
 
@@ -208,14 +230,15 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Backspace") return;
-      if (!isPlaying || gameState !== "PLAYING") return;
+      if (!isPlaying || gameState !== "PLAYING" || showTutorial || showSettings)
+        return;
       event.preventDefault();
       handleBackspace();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, gameState, handleBackspace]);
+  }, [isPlaying, gameState, showTutorial, showSettings, handleBackspace]);
 
   const handleSubmit = useCallback(() => {
     setState((prev) => {
@@ -304,14 +327,32 @@ export default function App() {
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (event.key !== "Enter") return;
-      if (!isPlaying || gameState !== "PLAYING") return;
+      if (!isPlaying || gameState !== "PLAYING" || showTutorial || showSettings)
+        return;
       event.preventDefault();
       handleSubmit();
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPlaying, gameState, handleSubmit]);
+  }, [isPlaying, gameState, showTutorial, showSettings, handleSubmit]);
+
+  // Escape closes open modals (tutorial or settings)
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      if (showTutorial) {
+        event.preventDefault();
+        handleCloseTutorial();
+      } else if (showSettings) {
+        event.preventDefault();
+        setShowSettings(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showTutorial, showSettings, handleCloseTutorial]);
 
   useEffect(() => {
     if (gameState === "WON") fireVictoryConfetti();
@@ -338,8 +379,8 @@ export default function App() {
       )
       .join("\n");
     const scoreTier = getScoreTier(score);
-    const shareText = `GeoTrace ${guesses.length}/${MAX_GUESSES}\n${score} pts (${scoreTier.tier} Tier ${scoreTier.label})\n\n${emojiRows}`;
-
+    const shareLink = "https://geotrace.bytemapstudio.com";
+    const shareText = `Geotrace ${guesses.length}/${MAX_GUESSES}\n${score} pts (${scoreTier.tier} Tier ${scoreTier.label.toUpperCase()})\n\n${emojiRows}\n\n${shareLink}`;
     navigator.clipboard?.writeText(shareText).then(() => {
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2000);
@@ -365,15 +406,17 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <button
-        type="button"
-        className="settings-button"
-        onClick={() => setShowSettings(true)}
-        aria-label="Open settings"
-        title="Settings"
-      >
-        <Settings size={18} />
-      </button>
+      {!showTutorial && (
+        <button
+          type="button"
+          className="settings-button"
+          onClick={() => setShowSettings(true)}
+          aria-label="Open settings"
+          title="Settings"
+        >
+          <Settings size={18} />
+        </button>
+      )}
 
       <div
         className="map-area"
@@ -383,7 +426,12 @@ export default function App() {
           currentTrace={currentTrace}
           onSelectLetter={handleSelectLetter}
           onNavigate={() => setShowExploreHint(false)}
-          disabled={!isPlaying || gameState !== "PLAYING"}
+          disabled={
+            !isPlaying ||
+            gameState !== "PLAYING" ||
+            showSettings ||
+            showTutorial
+          }
           level={activeLevel}
           beacons={levelBeacons}
         />
@@ -402,7 +450,7 @@ export default function App() {
           <header className="hud-float">
             <div className="hud-title">
               <MapPin size={20} className="hud-icon" />
-              <h1>GeoTrace</h1>
+              <h1>Geotrace</h1>
             </div>
             <div className="hud-badges">
               <div className="badge badge-score" title="Precision bonus score">
@@ -545,7 +593,7 @@ export default function App() {
         )}
       </div>
 
-      {launchPhase === "TUTORIAL" && (
+      {showTutorial && (
         <div className="tutorial-backdrop" role="presentation">
           <section
             className="tutorial-modal"
@@ -554,13 +602,24 @@ export default function App() {
             aria-labelledby="tutorial-title"
           >
             <div className="tutorial-heading">
-              <MapPin size={24} aria-hidden="true" />
-              <div>
-                <p className="tutorial-kicker">GeoTrace briefing</p>
-                <h2 id="tutorial-title">
-                  {tutorialPage === 0 ? "How to Play" : "Score the Signal"}
-                </h2>
+              <div className="tutorial-heading-left">
+                <MapPin size={24} aria-hidden="true" />
+                <div>
+                  <p className="tutorial-kicker">GeoTrace briefing</p>
+                  <h2 id="tutorial-title">
+                    {tutorialPage === 0 ? "How to Play" : "Score the Signal"}
+                  </h2>
+                </div>
               </div>
+              <button
+                type="button"
+                className="tutorial-close"
+                onClick={handleCloseTutorial}
+                aria-label="Close tutorial"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
             </div>
             {tutorialPage === 0 ? (
               <>
@@ -741,10 +800,19 @@ export default function App() {
               <button
                 type="button"
                 className="btn btn-primary tutorial-start"
-                onClick={() => setLaunchPhase("LAUNCHING")}
+                onClick={handleCloseTutorial}
               >
-                <Zap size={16} />
-                Start Game
+                {tutorialOpenedFromSettings ? (
+                  <>
+                    <ChevronLeft size={16} />
+                    Back to Settings
+                  </>
+                ) : (
+                  <>
+                    <Zap size={16} />
+                    Start Game
+                  </>
+                )}
               </button>
             </div>
           </section>
@@ -779,6 +847,28 @@ export default function App() {
                 title="Close"
               >
                 <X size={16} />
+              </button>
+            </div>
+
+            <div className="settings-section">
+              <p className="settings-label">Tutorial</p>
+              <button
+                type="button"
+                className="settings-card"
+                onClick={handleOpenTutorial}
+              >
+                <div className="settings-card-left">
+                  <div className="settings-card-icon">
+                    <BookOpen size={18} />
+                  </div>
+                  <div className="settings-card-info">
+                    <span className="settings-card-name">How to Play</span>
+                    <span className="settings-card-subtitle">
+                      Rules, scoring mechanics & controls
+                    </span>
+                  </div>
+                </div>
+                <span className="settings-card-badge">View</span>
               </button>
             </div>
 

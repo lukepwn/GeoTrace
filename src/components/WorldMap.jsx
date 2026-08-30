@@ -239,9 +239,10 @@ export default function WorldMap({
         maxScale={4}
         limitToBounds={false}
         centerOnInit
-        wheel={{ step: 0.15 }}
+        disabled={disabled}
+        wheel={{ step: 0.15, disabled: disabled }}
         doubleClick={{ disabled: true }}
-        panning={{ velocityDisabled: true }}
+        panning={{ velocityDisabled: true, disabled: disabled }}
         alignmentAnimation={{ disabled: true }}
         onPanningStart={() => {
           setIsNavigating(true);

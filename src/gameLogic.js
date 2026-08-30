@@ -1,4 +1,4 @@
-// GeoTrace core game data & pure logic (no React/DOM dependencies).
+// Geotrace core game data & pure logic (no React/DOM dependencies).
 import wordsRaw from "./words.txt?raw";
 import solutionsRaw from "./solutions.txt?raw";
 
@@ -111,14 +111,19 @@ const LETTER_POOL = [
   "D",
   "P",
   "P",
+  "P",
+  "M",
   "M",
   "M",
   "H",
   "H",
   "G",
   "G",
+  "G",
   "B",
   "B",
+  "B",
+  "F",
   "F",
   "F",
   "Y",
@@ -126,10 +131,17 @@ const LETTER_POOL = [
   "W",
   "W",
   "K",
+  "K",
+  "V",
   "V",
   "X",
+  "X",
+  "Z",
+  "Z",
   "Z",
   "J",
+  "J",
+  "Q",
   "Q",
 ];
 
