@@ -62,9 +62,10 @@ CREATE OR REPLACE FUNCTION public.check_callsign_available(
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 BEGIN
-  IF TRIM(requested_callsign) = '' THEN
+  IF requested_callsign IS NULL OR TRIM(requested_callsign) = '' THEN
     RETURN FALSE;
   END IF;
 
@@ -79,43 +80,98 @@ $$;
 -- Grant execution permissions for RPC
 GRANT EXECUTE ON FUNCTION public.check_callsign_available(TEXT, TEXT) TO anon, authenticated, service_role;
 
+-- 5b. FUNCTION: Resolve Login Email by Exact Callsign (RPC)
+-- Allows callsign-based login without exposing public.profiles to bulk SELECT queries
+CREATE OR REPLACE FUNCTION public.resolve_login_email(
+  requested_callsign TEXT
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  found_email TEXT;
+BEGIN
+  IF requested_callsign IS NULL OR TRIM(requested_callsign) = '' THEN
+    RETURN NULL;
+  END IF;
+
+  SELECT email INTO found_email
+  FROM public.profiles
+  WHERE LOWER(callsign) = LOWER(TRIM(requested_callsign))
+  LIMIT 1;
+
+  RETURN found_email;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.resolve_login_email(TEXT) TO anon, authenticated, service_role;
+
 -- 6. ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leaderboard_entries ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies if re-running
+-- Drop legacy & current policies if re-running
 DROP POLICY IF EXISTS "Allow public read on profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Allow public insert on profiles" ON public.profiles;
 DROP POLICY IF EXISTS "Allow public update on profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Users can read own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 
 DROP POLICY IF EXISTS "Allow public read on leaderboard_entries" ON public.leaderboard_entries;
 DROP POLICY IF EXISTS "Allow public insert on leaderboard_entries" ON public.leaderboard_entries;
 DROP POLICY IF EXISTS "Allow public update on leaderboard_entries" ON public.leaderboard_entries;
+DROP POLICY IF EXISTS "Authenticated users can insert own leaderboard entry" ON public.leaderboard_entries;
+DROP POLICY IF EXISTS "Authenticated users can update own leaderboard entry" ON public.leaderboard_entries;
 
--- Public read/write policies for seamless guest & authenticated play
-CREATE POLICY "Allow public read on profiles"
+-- Profiles: authenticated users can only read/write their own row
+CREATE POLICY "Users can read own profile"
   ON public.profiles FOR SELECT
-  USING (true);
+  TO authenticated
+  USING (auth.uid()::text = id);
 
-CREATE POLICY "Allow public insert on profiles"
+CREATE POLICY "Users can insert own profile"
   ON public.profiles FOR INSERT
-  WITH CHECK (true);
+  TO authenticated
+  WITH CHECK (auth.uid()::text = id);
 
-CREATE POLICY "Allow public update on profiles"
+CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE
-  USING (true);
+  TO authenticated
+  USING (auth.uid()::text = id)
+  WITH CHECK (auth.uid()::text = id);
 
+-- Leaderboard: public read, authenticated owner-only write with score bounds
 CREATE POLICY "Allow public read on leaderboard_entries"
   ON public.leaderboard_entries FOR SELECT
   USING (true);
 
-CREATE POLICY "Allow public insert on leaderboard_entries"
+CREATE POLICY "Authenticated users can insert own leaderboard entry"
   ON public.leaderboard_entries FOR INSERT
-  WITH CHECK (true);
+  TO authenticated
+  WITH CHECK (
+    auth.uid()::text = user_id
+    AND score >= 0 AND score <= 2000
+    AND guesses_count BETWEEN 1 AND 6
+    AND time_seconds >= 0
+    AND tier IN ('S', 'A', 'B', 'C', 'D')
+    AND game_state IN ('WON', 'LOST')
+  );
 
-CREATE POLICY "Allow public update on leaderboard_entries"
+CREATE POLICY "Authenticated users can update own leaderboard entry"
   ON public.leaderboard_entries FOR UPDATE
-  USING (true);
+  TO authenticated
+  USING (auth.uid()::text = user_id)
+  WITH CHECK (
+    auth.uid()::text = user_id
+    AND score >= 0 AND score <= 2000
+    AND guesses_count BETWEEN 1 AND 6
+    AND time_seconds >= 0
+    AND tier IN ('S', 'A', 'B', 'C', 'D')
+    AND game_state IN ('WON', 'LOST')
+  );
 
 -- 7. SAFE REALTIME BROADCASTING
 DO $$
@@ -153,12 +209,12 @@ ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow public insert on feedback" ON public.feedback;
 DROP POLICY IF EXISTS "Allow public read on feedback" ON public.feedback;
 
--- Anyone can submit feedback
+-- Anyone can submit bounded feedback; user_id must be NULL (guest) or match auth.uid()
+-- No SELECT policy is granted: only Supabase Dashboard / service_role can read feedback
 CREATE POLICY "Allow public insert on feedback"
   ON public.feedback FOR INSERT
-  WITH CHECK (true);
-
--- Only authenticated admins/service roles can read feedback directly by default, or read own submissions
-CREATE POLICY "Allow public read on feedback"
-  ON public.feedback FOR SELECT
-  USING (true);
+  TO anon, authenticated
+  WITH CHECK (
+    char_length(trim(message)) BETWEEN 1 AND 1500
+    AND (user_id IS NULL OR user_id = auth.uid()::text)
+  );

@@ -63,7 +63,7 @@ export async function submitPlayerFeedback({
   }
 
   const payload = {
-    user_id: profile?.id || null,
+    user_id: profile?.isRegistered && profile?.id ? profile.id : null,
     callsign: profile?.callsign || "Guest",
     email: email.trim() || profile?.email || null,
     category,

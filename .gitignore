@@ -24,5 +24,18 @@ dist-ssr
 *.sw?
 
 # Environment variables
-.env.local
-.env.*.local
+.env
+.env.*
+!.env.example
+
+# Platform & CLI local state
+.vercel
+.supabase
+.wrangler
+
+# Secrets & certificates
+*.pem
+*.key
+
+# OS artifacts
+Thumbs.db

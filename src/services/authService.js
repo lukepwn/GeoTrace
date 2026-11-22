@@ -52,7 +52,7 @@ export async function checkCallsignAvailability(
   const clean = callsign.trim();
 
   try {
-    // 1. Try RPC check_callsign_available if installed
+    // Check availability via SECURITY DEFINER RPC (public.profiles is owner-only under RLS)
     const { data: rpcAvailable, error: rpcError } = await supabase.rpc(
       "check_callsign_available",
       {
@@ -61,30 +61,16 @@ export async function checkCallsignAvailability(
       },
     );
 
-    if (!rpcError && typeof rpcAvailable === "boolean") {
+    if (rpcError) {
+      console.warn("Callsign RPC error:", rpcError);
+      return { available: true };
+    }
+
+    if (typeof rpcAvailable === "boolean") {
       return {
         available: rpcAvailable,
         reason: rpcAvailable ? undefined : "Callsign is already claimed.",
       };
-    }
-
-    // 2. Fallback direct table query
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, callsign")
-      .ilike("callsign", clean)
-      .limit(1);
-
-    if (error) {
-      console.warn("Callsign query error:", error);
-      return { available: true };
-    }
-
-    if (data && data.length > 0) {
-      if (currentUserId && data[0].id === currentUserId) {
-        return { available: true };
-      }
-      return { available: false, reason: "Callsign is already claimed." };
     }
 
     return { available: true };
@@ -344,15 +330,14 @@ export async function signIn({ identifier, email, password }) {
     if (rawIdent.includes("@") && rawIdent.includes(".")) {
       authEmailToTry = rawIdent;
     } else {
-      // 2. Identifier is a callsign: look up profile by callsign to find registered email if any
-      const { data: profileRow } = await supabase
-        .from("profiles")
-        .select("id, callsign, email")
-        .ilike("callsign", rawIdent)
-        .maybeSingle();
+      // 2. Identifier is a callsign: resolve registered email via SECURITY DEFINER RPC
+      const { data: resolvedEmail, error: resolveErr } = await supabase.rpc(
+        "resolve_login_email",
+        { requested_callsign: rawIdent },
+      );
 
-      if (profileRow && profileRow.email) {
-        authEmailToTry = profileRow.email;
+      if (!resolveErr && resolvedEmail) {
+        authEmailToTry = resolvedEmail;
       } else {
         authEmailToTry = generateSyntheticEmail(rawIdent);
       }
